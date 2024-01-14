@@ -413,45 +413,42 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                                 // Whisper API can't handle less than 0.1 seconds of audio.
                                 // So we'll only transcribe if the recording is longer than 0.2 seconds.
-                                if elapsed.as_secs_f32() > 0.2 {
-                                    let transcription_result = match runtime.block_on(
-                                        future::timeout(
-                                            Duration::from_secs(10),
-                                            trans::transcribe(&client, &voice_tmp_path),
-                                        ),
-                                    ) {
-                                        Ok(transcription_result) => transcription_result,
-                                        Err(err) => {
-                                            println!("Error: Failed to transcribe audio due to timeout: {:?}", err);
-                                            continue;
-                                        }
-                                    };
-
-                                    let mut transcription = match transcription_result {
-                                        Ok(transcription) => transcription,
-                                        Err(err) => {
-                                            println!(
-                                                "Error: Failed to transcribe audio: {:?}",
-                                                err
-                                            );
-                                            continue;
-                                        }
-                                    };
-
-                                    if let Some(last_char) = transcription.chars().last() {
-                                        if ['.', '?', '!', ','].contains(&last_char) {
-                                            transcription.push(' ');
-                                        }
-                                    }
-
-                                    if transcription.is_empty() {
-                                        println!("No transcription");
-                                    }
-
-                                    enigo.key_sequence(&transcription);
-                                } else {
+                                if elapsed.as_secs_f32() < 0.2 {
                                     println!("Recording too short");
+                                    continue;
                                 }
+
+                                let transcription_result = match runtime.block_on(future::timeout(
+                                    Duration::from_secs(10),
+                                    trans::transcribe(&client, &voice_tmp_path),
+                                )) {
+                                    Ok(transcription_result) => transcription_result,
+                                    Err(err) => {
+                                        println!("Error: Failed to transcribe audio due to timeout: {:?}", err);
+                                        continue;
+                                    }
+                                };
+
+                                let mut transcription = match transcription_result {
+                                    Ok(transcription) => transcription,
+                                    Err(err) => {
+                                        println!("Error: Failed to transcribe audio: {:?}", err);
+                                        continue;
+                                    }
+                                };
+
+                                if let Some(last_char) = transcription.chars().last() {
+                                    if ['.', '?', '!', ','].contains(&last_char) {
+                                        transcription.push(' ');
+                                    }
+                                }
+
+                                if transcription.is_empty() {
+                                    println!("No transcription");
+                                    continue;
+                                }
+
+                                enigo.key_sequence(&transcription);
                             }
                         }
                         _ => (),
