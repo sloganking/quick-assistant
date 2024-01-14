@@ -116,7 +116,8 @@ pub mod rec {
             };
 
             match device.name() {
-                Ok(name) => println!("Input device: {}", name),
+                // Ok(name) => println!("Input device: {}", name),
+                Ok(name) => {}
                 Err(e) => println!("Failed to get device name: {}", e),
             }
 
@@ -124,7 +125,7 @@ pub mod rec {
                 .default_input_config()
                 .context("Failed to get default input config")?;
 
-            println!("Default input config: {:?}", config);
+            // println!("Default input config: {:?}", config);
 
             // The WAV file we're recording to.
             let spec = wav_spec_from_config(&config);
