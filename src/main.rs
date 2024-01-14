@@ -13,7 +13,7 @@ use async_openai::{
         ChatCompletionFunctionsArgs, ChatCompletionRequestAssistantMessageArgs,
         ChatCompletionRequestFunctionMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        CreateChatCompletionRequestArgs, Role,
+        CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, Role, SpeechModel, Voice,
     },
     Client,
 };
@@ -367,6 +367,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mut recorder = rec::Recorder::new();
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
+
+                message_history.push(
+                    ChatCompletionRequestSystemMessageArgs::default()
+                        .content("You are a desktop voice assistant. Your responses will be spoken by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds.")
+                        .build()
+                        .unwrap()
+                        .into(),
+                );
+
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
@@ -380,6 +389,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mut key_pressed = false;
                 let key_to_check = ptt_key;
 
+                // Setup vars for playing sound through speakers
+                let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+
                 for event in rx.iter() {
                     // println!("Received: {:?}", event);
                     match event.event_type {
@@ -387,6 +400,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && !key_pressed {
                                 key_pressed = true;
                                 // handle key press
+                                sink.stop();
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
                                     Ok(_) => (),
@@ -475,12 +489,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 );
 
                                 // repeatedly create request until it's answered
-                                let mut ai_content;
+                                // let mut ai_content;
                                 let mut displayed_ai_label = false;
-                                'request: loop {
-                                    ai_content = String::new();
+                                let ai_content = 'request: loop {
+                                    // ai_content = String::new();
                                     let request = CreateChatCompletionRequestArgs::default()
-                                        .model("gpt-3.5-turbo")
+                                        // .model("gpt-3.5-turbo")
+                                        // .model("gpt-4-0613")
+                                        .model("gpt-4-1106-preview")
                                         .max_tokens(512u16)
                                         .messages(message_history.clone())
                                         .build()
@@ -508,11 +524,37 @@ fn main() -> Result<(), Box<dyn Error>> {
                                                 .unwrap()
                                                 .into(),
                                             );
+                                            break ai_content;
                                         }
                                         None => println!("No content"),
                                     }
+                                };
 
-                                    break;
+                                // Speak the AI's response
+
+                                let request = CreateSpeechRequestArgs::default()
+                                    .input(ai_content)
+                                    .voice(Voice::Echo)
+                                    .model(SpeechModel::Tts1)
+                                    .build()
+                                    .unwrap();
+
+                                let response =
+                                    runtime.block_on(client.audio().speech(request)).unwrap();
+
+                                runtime.block_on(response.save("./data/chat.mp3")).unwrap();
+
+                                // play sound
+                                {
+                                    let file = std::fs::File::open("./data/chat.mp3").unwrap();
+                                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+
+                                    // let beep1 = stream_handle.play_once(BufReader::new(file)).unwrap();
+                                    // beep1.set_volume(0.2);
+                                    println!("Speaking...");
+
+                                    // sink.sleep_until_end();
+                                    sink.play();
                                 }
                             }
                         }
