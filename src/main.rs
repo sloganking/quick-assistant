@@ -1,8 +1,11 @@
 use anyhow::Context;
+// use async_std::path::PathBuf;
 use dotenvy::dotenv;
 use enigo::{Enigo, KeyboardControllable};
 use std::env;
 use std::io::{self, stdin, stdout, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tempfile::tempdir;
 mod transcribe;
 use std::thread;
@@ -46,6 +49,10 @@ struct Opt {
     /// Use this if you want to use a key that is not supported by the PTTKey enum.
     #[arg(short, long, conflicts_with("ptt_key"))]
     special_ptt_key: Option<u32>,
+
+    /// How fast the AI speaks. 1.0 is normal speed.
+    #[arg(short, long, default_value_t = 1.0)]
+    speech_speed: f32,
 
     #[clap(subcommand)]
     pub subcommands: Option<SubCommands>,
@@ -285,6 +292,70 @@ impl From<PTTKey> for rdev::Key {
             PTTKey::Unknown(code) => rdev::Key::Unknown(code),
         }
     }
+}
+
+// fn modify_filename(path: &Path, new_filename: &str) -> PathBuf {
+//     println!("path before modify: {:?}", path);
+//     let parent = path.parent().unwrap();
+//     let new_path = parent.join(new_filename);
+
+//     let new_path = if let Some(extension) = path.extension() {
+//         new_path.with_extension(extension)
+//     } else {
+//         new_path
+//     };
+
+//     println!("new path after modify: {:?}", new_path);
+//     new_path
+// }
+
+/// Speeds up an audio file by a factor of `speed`.
+fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
+    // println!("input audio path: {:?}", input);
+    // println!("output audio path: {:?}", output);
+    // ffmpeg -y -i input.mp3 -filter:a "atempo={speed}" -vn output.mp3
+    match Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i",
+            input
+                .to_str()
+                .context("Failed to convert input path to string")
+                .unwrap(),
+            // -codec:a libmp3lame -b:a 160k
+            // audio quality decreases from 160k bitrate to 33k bitrate without these lines.
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "160k",
+            //
+            "-filter:a",
+            format!("atempo={}", speed).as_str(),
+            "-vn",
+            output
+                .to_str()
+                .context("Failed to convert output path to string")
+                .unwrap(),
+        ])
+        .output()
+    {
+        Ok(x) => {
+            // println!("{:#?}", x);
+            if !x.status.success() {
+                panic!("ffmpeg failed to adjust audio speed");
+            } else {
+                // println!("Audio speed adjusted");
+            }
+            x
+        }
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                panic!("ffmpeg not found. Please install ffmpeg and add it to your PATH");
+            } else {
+                panic!("ffmpeg failed to adjust audio speed");
+            }
+        }
+    };
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -546,14 +617,32 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                                 // play sound
                                 {
-                                    let file = std::fs::File::open("./data/chat.mp3").unwrap();
+                                    let file_to_play = if opt.speech_speed != 1.0 {
+                                        // println!("Adjusting audio speed...");
+                                        // sink.set_speed(opt.speech_speed);
+
+                                        let audio_to_speed_up: PathBuf =
+                                            PathBuf::from("./data/chat.mp3");
+                                        let sped_up_audio_path: PathBuf =
+                                            PathBuf::from("./data/adjusted_speed.mp3");
+
+                                        adjust_audio_file_speed(
+                                            audio_to_speed_up.as_path().into(),
+                                            sped_up_audio_path.as_path().into(),
+                                            opt.speech_speed,
+                                        );
+                                        sped_up_audio_path
+                                    } else {
+                                        PathBuf::from("./data/chat.mp3")
+                                    };
+
+                                    let file = std::fs::File::open(file_to_play).unwrap();
                                     sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
 
                                     // let beep1 = stream_handle.play_once(BufReader::new(file)).unwrap();
                                     // beep1.set_volume(0.2);
-                                    println!("Speaking...");
+                                    println!("{}", "Speaking...".truecolor(128, 128, 128));
 
-                                    // sink.sleep_until_end();
                                     sink.play();
                                 }
                             }
