@@ -18,3 +18,5 @@ hound = "3.5.1"
 rdev = "0.5.3"
 tempfile = "3.8.0"
 tokio = { version = "1.29.0", features = ["macros", "rt-multi-thread"] }
+futures = "0.3.28"
+colored = "2.0.4"

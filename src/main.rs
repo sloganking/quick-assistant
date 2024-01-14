@@ -1,16 +1,27 @@
 use anyhow::Context;
-use async_openai::Client;
 use dotenvy::dotenv;
 use enigo::{Enigo, KeyboardControllable};
 use std::env;
+use std::io::{self, stdin, stdout, BufReader, Write};
 use tempfile::tempdir;
 mod transcribe;
 use std::thread;
 use transcribe::trans;
 mod record;
+use async_openai::{
+    types::{
+        ChatCompletionFunctionsArgs, ChatCompletionRequestAssistantMessageArgs,
+        ChatCompletionRequestFunctionMessageArgs, ChatCompletionRequestMessage,
+        ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+        CreateChatCompletionRequestArgs, Role,
+    },
+    Client,
+};
 use async_std::future;
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 use cpal::traits::{DeviceTrait, HostTrait};
+use futures::StreamExt;
 use rdev::{listen, Event};
 use record::rec;
 use std::error::Error;
@@ -355,6 +366,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             thread::spawn(move || {
                 let mut recorder = rec::Recorder::new();
                 let client = Client::new();
+                let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
@@ -448,7 +460,60 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     continue;
                                 }
 
-                                enigo.key_sequence(&transcription);
+                                // enigo.key_sequence(&transcription);
+
+                                println!("{}", "You: ".truecolor(0, 255, 0));
+                                println!("{}", transcription);
+
+                                message_history.push(
+                                    ChatCompletionRequestUserMessageArgs::default()
+                                        .content(transcription)
+                                        // .role(Role::User)
+                                        .build()
+                                        .unwrap()
+                                        .into(),
+                                );
+
+                                // repeatedly create request until it's answered
+                                let mut ai_content;
+                                let mut displayed_ai_label = false;
+                                'request: loop {
+                                    ai_content = String::new();
+                                    let request = CreateChatCompletionRequestArgs::default()
+                                        .model("gpt-3.5-turbo")
+                                        .max_tokens(512u16)
+                                        .messages(message_history.clone())
+                                        .build()
+                                        .unwrap();
+
+                                    let response_message = runtime
+                                        .block_on(client.chat().create(request))
+                                        .unwrap()
+                                        .choices
+                                        .get(0)
+                                        .unwrap()
+                                        .message
+                                        .clone();
+
+                                    match response_message.content {
+                                        Some(ai_content) => {
+                                            println!("{}", "AI: ".truecolor(255, 0, 0));
+                                            println!("{}", ai_content);
+                                            message_history.push(
+                                                ChatCompletionRequestAssistantMessageArgs::default(
+                                                )
+                                                .content(&ai_content)
+                                                // .role(Role::Assistant)
+                                                .build()
+                                                .unwrap()
+                                                .into(),
+                                            );
+                                        }
+                                        None => println!("No content"),
+                                    }
+
+                                    break;
+                                }
                             }
                         }
                         _ => (),
