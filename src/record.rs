@@ -117,7 +117,7 @@ pub mod rec {
 
             match device.name() {
                 // Ok(name) => println!("Input device: {}", name),
-                Ok(name) => {}
+                Ok(_name) => {}
                 Err(e) => println!("Failed to get device name: {}", e),
             }
 

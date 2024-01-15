@@ -1,23 +1,21 @@
 use anyhow::Context;
 // use async_std::path::PathBuf;
 use dotenvy::dotenv;
-use enigo::{Enigo, KeyboardControllable};
 use std::env;
-use std::io::{self, stdin, stdout, BufReader, Write};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::tempdir;
 mod transcribe;
-use chrono::{Local, Utc};
+use chrono::Local;
 use std::thread;
 use transcribe::trans;
 mod record;
 use async_openai::{
     types::{
-        ChatCompletionFunctionsArgs, ChatCompletionRequestAssistantMessageArgs,
-        ChatCompletionRequestFunctionMessageArgs, ChatCompletionRequestMessage,
+        ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, Role, SpeechModel, Voice,
+        CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
     },
     Client,
 };
@@ -25,11 +23,10 @@ use async_std::future;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use cpal::traits::{DeviceTrait, HostTrait};
-use futures::StreamExt;
 use rdev::{listen, Event};
 use record::rec;
 use std::error::Error;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -451,7 +448,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
-                let mut enigo = Enigo::new();
 
                 let tmp_dir = tempdir().unwrap();
                 // println!("{:?}", tmp_dir.path());
@@ -565,8 +561,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                                 // repeatedly create request until it's answered
                                 // let mut ai_content;
-                                let mut displayed_ai_label = false;
-                                let ai_content = 'request: loop {
+                                let ai_content = loop {
                                     // ai_content = String::new();
                                     let request = CreateChatCompletionRequestArgs::default()
                                         // .model("gpt-3.5-turbo")
@@ -581,7 +576,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         .block_on(client.chat().create(request))
                                         .unwrap()
                                         .choices
-                                        .get(0)
+                                        .first()
                                         .unwrap()
                                         .message
                                         .clone();
@@ -631,8 +626,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             PathBuf::from("./data/adjusted_speed.mp3");
 
                                         adjust_audio_file_speed(
-                                            audio_to_speed_up.as_path().into(),
-                                            sped_up_audio_path.as_path().into(),
+                                            audio_to_speed_up.as_path(),
+                                            sped_up_audio_path.as_path(),
                                             opt.speech_speed,
                                         );
                                         sped_up_audio_path
