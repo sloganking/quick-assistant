@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::tempdir;
 mod transcribe;
+use chrono::{Local, Utc};
 use std::thread;
 use transcribe::trans;
 mod record;
@@ -28,7 +29,7 @@ use futures::StreamExt;
 use rdev::{listen, Event};
 use record::rec;
 use std::error::Error;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -550,9 +551,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 println!("{}", "You: ".truecolor(0, 255, 0));
                                 println!("{}", transcription);
 
+                                let time_header = format!("Local Time: {}", Local::now());
+                                let user_message = time_header + "\n" + &transcription;
+
                                 message_history.push(
                                     ChatCompletionRequestUserMessageArgs::default()
-                                        .content(transcription)
+                                        .content(user_message)
                                         // .role(Role::User)
                                         .build()
                                         .unwrap()
