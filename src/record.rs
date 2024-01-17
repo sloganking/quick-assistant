@@ -34,6 +34,7 @@ pub mod rec {
     // }
 
     pub struct Recorder {
+        #[allow(clippy::type_complexity)]
         utils: Option<(Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>, cpal::Stream)>,
     }
 
