@@ -342,6 +342,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let _ = dotenv();
 
+    const AUDIO_TO_SPEED_UP: &str = "./data/chat.mp3";
+
     match opt.subcommands {
         Some(subcommand) => {
             match subcommand {
@@ -617,27 +619,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         let response = runtime.block_on(client.audio().speech(request)).unwrap();
 
-                        runtime.block_on(response.save("./data/chat.mp3")).unwrap();
+                        runtime.block_on(response.save(AUDIO_TO_SPEED_UP)).unwrap();
                     }
 
                     // play sound of AI speech
                     {
                         let file_to_play = if opt.speech_speed != 1.0 {
-                            // println!("Adjusting audio speed...");
-                            // ai_voice_sink.set_speed(opt.speech_speed);
-
-                            let audio_to_speed_up: PathBuf = PathBuf::from("./data/chat.mp3");
                             let sped_up_audio_path: PathBuf =
                                 PathBuf::from("./data/adjusted_speed.mp3");
 
                             adjust_audio_file_speed(
-                                audio_to_speed_up.as_path(),
+                                PathBuf::from(AUDIO_TO_SPEED_UP).as_path(),
                                 sped_up_audio_path.as_path(),
                                 opt.speech_speed,
                             );
                             sped_up_audio_path
                         } else {
-                            PathBuf::from("./data/chat.mp3")
+                            PathBuf::from(AUDIO_TO_SPEED_UP)
                         };
 
                         let file = std::fs::File::open(file_to_play).unwrap();
