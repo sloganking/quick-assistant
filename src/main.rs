@@ -442,7 +442,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let ai_voice_sink = sink.clone();
 
-            // create audio recorder thread
+            // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
             // It then sends the path of the recorded audio file to the AI thread.
             thread::spawn(move || {
@@ -513,7 +513,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let ai_voice_sink = sink.clone();
 
             // Create AI thread
-            // This thread listens to the audio recorder thread and transcribes the audio.
+            // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
             thread::spawn(move || {
                 let client = Client::new();
