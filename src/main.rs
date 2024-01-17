@@ -1,5 +1,4 @@
 use anyhow::Context;
-// use async_std::path::PathBuf;
 use dotenvy::dotenv;
 use std::env;
 use std::io::BufReader;
@@ -51,6 +50,7 @@ struct Opt {
     special_ptt_key: Option<u32>,
 
     /// How fast the AI speaks. 1.0 is normal speed.
+    /// 0.5 is minimum. 100.0 is maximum.
     #[arg(short, long, default_value_t = 1.0)]
     speech_speed: f32,
 
@@ -294,25 +294,8 @@ impl From<PTTKey> for rdev::Key {
     }
 }
 
-// fn modify_filename(path: &Path, new_filename: &str) -> PathBuf {
-//     println!("path before modify: {:?}", path);
-//     let parent = path.parent().unwrap();
-//     let new_path = parent.join(new_filename);
-
-//     let new_path = if let Some(extension) = path.extension() {
-//         new_path.with_extension(extension)
-//     } else {
-//         new_path
-//     };
-
-//     println!("new path after modify: {:?}", new_path);
-//     new_path
-// }
-
 /// Speeds up an audio file by a factor of `speed`.
 fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
-    // println!("input audio path: {:?}", input);
-    // println!("output audio path: {:?}", output);
     // ffmpeg -y -i input.mp3 -filter:a "atempo={speed}" -vn output.mp3
     match Command::new("ffmpeg")
         .args([
@@ -340,11 +323,8 @@ fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
         .output()
     {
         Ok(x) => {
-            // println!("{:#?}", x);
             if !x.status.success() {
                 panic!("ffmpeg failed to adjust audio speed");
-            } else {
-                // println!("Audio speed adjusted");
             }
             x
         }
@@ -398,10 +378,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         };
                         println!("{:?}", device_name);
                     }
-
-                    // devices
-                    //     .filter_map(|device| device.name().ok())
-                    //     .for_each(|device_name| println!("{:?}", device_name));
                 }
             }
 
@@ -409,7 +385,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         // Run AI
         None => {
-            // Fail if voice speed out of range
+            // Fail if ai_voice_speed out of range
             if opt.speech_speed < 0.5 || opt.speech_speed > 100.0 {
                 println!("Speech speed must be between 0.5 and 100.0");
                 return Ok(());
@@ -460,7 +436,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let tmp_dir = tempdir().unwrap();
                 let mut voice_tmp_path_option: Option<PathBuf> = None;
                 for event in rx.iter() {
-                    // println!("Received: {:?}", event);
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
                             if key == key_to_check && !key_pressed {
@@ -542,10 +517,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .context("Failed to create tokio runtime")
                     .unwrap();
 
-                // Setup vars for playing sound through speakers
-                // let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                // let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-
                 for audio_path in recording_rx.iter() {
                     ai_voice_sink.stop();
 
@@ -582,8 +553,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
 
-                    // enigo.key_sequence(&transcription);
-
                     println!("{}", "You: ".truecolor(0, 255, 0));
                     println!("{}", transcription);
 
@@ -593,7 +562,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     message_history.push(
                         ChatCompletionRequestUserMessageArgs::default()
                             .content(user_message)
-                            // .role(Role::User)
                             .build()
                             .unwrap()
                             .into(),
@@ -676,8 +644,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let file = std::fs::File::open(file_to_play).unwrap();
                         ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
 
-                        // let beep1 = stream_handle.play_once(BufReader::new(file)).unwrap();
-                        // beep1.set_volume(0.2);
                         println!("{}", "Speaking...".truecolor(128, 128, 128));
 
                         ai_voice_sink.play();
