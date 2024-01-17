@@ -5,6 +5,7 @@ use std::env;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use tempfile::tempdir;
 mod transcribe;
 use chrono::Local;
@@ -431,35 +432,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let (tx, rx): (flume::Sender<Event>, flume::Receiver<Event>) = flume::unbounded();
 
-            // create key handler thread
+            let (recording_tx, recording_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
+                flume::unbounded();
+
+            // Setup vars for playing sound through speakers
+            let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+            let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+            let sink = Arc::new(sink);
+
+            let ai_voice_sink = sink.clone();
+
+            // create audio recorder thread
+            // This thread listens to the push to talk key and records audio when it's pressed.
+            // It then sends the path of the recorded audio file to the AI thread.
             thread::spawn(move || {
                 let mut recorder = rec::Recorder::new();
-                let client = Client::new();
-                let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
-
-                message_history.push(
-                    ChatCompletionRequestSystemMessageArgs::default()
-                        .content("You are a desktop voice assistant. Your responses will be spoken by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more', ask 'why did you ask?', and more personable questions like a real human relationship.")
-                        .build()
-                        .unwrap()
-                        .into(),
-                );
-
-                let runtime = tokio::runtime::Runtime::new()
-                    .context("Failed to create tokio runtime")
-                    .unwrap();
-
                 let tmp_dir = tempdir().unwrap();
-                // println!("{:?}", tmp_dir.path());
                 let voice_tmp_path = tmp_dir.path().join("voice_tmp.wav");
 
                 let mut recording_start = std::time::SystemTime::now();
                 let mut key_pressed = false;
                 let key_to_check = ptt_key;
-
-                // Setup vars for playing sound through speakers
-                let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
                 for event in rx.iter() {
                     // println!("Received: {:?}", event);
@@ -468,7 +461,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && !key_pressed {
                                 key_pressed = true;
                                 // handle key press
-                                sink.stop();
+
+                                ai_voice_sink.stop();
+
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
                                     Ok(_) => (),
@@ -488,6 +483,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     Ok(elapsed) => elapsed,
                                     Err(err) => {
                                         println!("Error: Failed to get elapsed recording time. Skipping transcription: \n\n{}",err);
+                                        let _ = recorder.stop_recording();
                                         continue;
                                     }
                                 };
@@ -499,12 +495,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                 }
 
-                                // future::timeout(
-                                //     Duration::from_secs(10),
-                                //     trans::transcribe(&client, &voice_tmp_path),
-                                // )
-                                // .await;
-
                                 // Whisper API can't handle less than 0.1 seconds of audio.
                                 // So we'll only transcribe if the recording is longer than 0.2 seconds.
                                 if elapsed.as_secs_f32() < 0.2 {
@@ -512,141 +502,174 @@ fn main() -> Result<(), Box<dyn Error>> {
                                     continue;
                                 }
 
-                                let transcription_result = match runtime.block_on(future::timeout(
-                                    Duration::from_secs(10),
-                                    trans::transcribe(&client, &voice_tmp_path),
-                                )) {
-                                    Ok(transcription_result) => transcription_result,
-                                    Err(err) => {
-                                        println!("Error: Failed to transcribe audio due to timeout: {:?}", err);
-                                        continue;
-                                    }
-                                };
+                                recording_tx.send(voice_tmp_path.clone()).unwrap();
+                            }
+                        }
+                        _ => (),
+                    }
+                }
+            });
 
-                                let mut transcription = match transcription_result {
-                                    Ok(transcription) => transcription,
-                                    Err(err) => {
-                                        println!("Error: Failed to transcribe audio: {:?}", err);
-                                        continue;
-                                    }
-                                };
+            let ai_voice_sink = sink.clone();
 
-                                if let Some(last_char) = transcription.chars().last() {
-                                    if ['.', '?', '!', ','].contains(&last_char) {
-                                        transcription.push(' ');
-                                    }
-                                }
+            // Create AI thread
+            // This thread listens to the audio recorder thread and transcribes the audio.
+            // before feeding it to the AI assistant.
+            thread::spawn(move || {
+                let client = Client::new();
+                let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
-                                if transcription.is_empty() {
-                                    println!("No transcription");
-                                    continue;
-                                }
+                message_history.push(
+                    ChatCompletionRequestSystemMessageArgs::default()
+                        .content("You are a desktop voice assistant. Your responses will be spoken by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more', ask 'why did you ask?', and more personable questions like a real human relationship.")
+                        .build()
+                        .unwrap()
+                        .into(),
+                );
 
-                                // enigo.key_sequence(&transcription);
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime")
+                    .unwrap();
 
-                                println!("{}", "You: ".truecolor(0, 255, 0));
-                                println!("{}", transcription);
+                // Setup vars for playing sound through speakers
+                // let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+                // let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
-                                let time_header = format!("Local Time: {}", Local::now());
-                                let user_message = time_header + "\n" + &transcription;
+                for audio_path in recording_rx.iter() {
+                    ai_voice_sink.stop();
 
+                    let transcription_result = match runtime.block_on(future::timeout(
+                        Duration::from_secs(10),
+                        trans::transcribe(&client, &audio_path),
+                    )) {
+                        Ok(transcription_result) => transcription_result,
+                        Err(err) => {
+                            println!(
+                                "Error: Failed to transcribe audio due to timeout: {:?}",
+                                err
+                            );
+                            continue;
+                        }
+                    };
+
+                    let mut transcription = match transcription_result {
+                        Ok(transcription) => transcription,
+                        Err(err) => {
+                            println!("Error: Failed to transcribe audio: {:?}", err);
+                            continue;
+                        }
+                    };
+
+                    if let Some(last_char) = transcription.chars().last() {
+                        if ['.', '?', '!', ','].contains(&last_char) {
+                            transcription.push(' ');
+                        }
+                    }
+
+                    if transcription.is_empty() {
+                        println!("No transcription");
+                        continue;
+                    }
+
+                    // enigo.key_sequence(&transcription);
+
+                    println!("{}", "You: ".truecolor(0, 255, 0));
+                    println!("{}", transcription);
+
+                    let time_header = format!("Local Time: {}", Local::now());
+                    let user_message = time_header + "\n" + &transcription;
+
+                    message_history.push(
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(user_message)
+                            // .role(Role::User)
+                            .build()
+                            .unwrap()
+                            .into(),
+                    );
+
+                    // repeatedly create request until it's answered
+                    // let mut ai_content;
+                    let ai_content = loop {
+                        // ai_content = String::new();
+                        let request = CreateChatCompletionRequestArgs::default()
+                            // .model("gpt-3.5-turbo")
+                            // .model("gpt-4-0613")
+                            .model("gpt-4-1106-preview")
+                            .max_tokens(512u16)
+                            .messages(message_history.clone())
+                            .build()
+                            .unwrap();
+
+                        let response_message = runtime
+                            .block_on(client.chat().create(request))
+                            .unwrap()
+                            .choices
+                            .first()
+                            .unwrap()
+                            .message
+                            .clone();
+
+                        match response_message.content {
+                            Some(ai_content) => {
+                                println!("{}", "AI: ".truecolor(255, 0, 0));
+                                println!("{}", ai_content);
                                 message_history.push(
-                                    ChatCompletionRequestUserMessageArgs::default()
-                                        .content(user_message)
-                                        // .role(Role::User)
+                                    ChatCompletionRequestAssistantMessageArgs::default()
+                                        .content(&ai_content)
+                                        // .role(Role::Assistant)
                                         .build()
                                         .unwrap()
                                         .into(),
                                 );
-
-                                // repeatedly create request until it's answered
-                                // let mut ai_content;
-                                let ai_content = loop {
-                                    // ai_content = String::new();
-                                    let request = CreateChatCompletionRequestArgs::default()
-                                        // .model("gpt-3.5-turbo")
-                                        // .model("gpt-4-0613")
-                                        .model("gpt-4-1106-preview")
-                                        .max_tokens(512u16)
-                                        .messages(message_history.clone())
-                                        .build()
-                                        .unwrap();
-
-                                    let response_message = runtime
-                                        .block_on(client.chat().create(request))
-                                        .unwrap()
-                                        .choices
-                                        .first()
-                                        .unwrap()
-                                        .message
-                                        .clone();
-
-                                    match response_message.content {
-                                        Some(ai_content) => {
-                                            println!("{}", "AI: ".truecolor(255, 0, 0));
-                                            println!("{}", ai_content);
-                                            message_history.push(
-                                                ChatCompletionRequestAssistantMessageArgs::default(
-                                                )
-                                                .content(&ai_content)
-                                                // .role(Role::Assistant)
-                                                .build()
-                                                .unwrap()
-                                                .into(),
-                                            );
-                                            break ai_content;
-                                        }
-                                        None => println!("No content"),
-                                    }
-                                };
-
-                                // Speak the AI's response
-
-                                let request = CreateSpeechRequestArgs::default()
-                                    .input(ai_content)
-                                    .voice(Voice::Echo)
-                                    .model(SpeechModel::Tts1)
-                                    .build()
-                                    .unwrap();
-
-                                let response =
-                                    runtime.block_on(client.audio().speech(request)).unwrap();
-
-                                runtime.block_on(response.save("./data/chat.mp3")).unwrap();
-
-                                // play sound
-                                {
-                                    let file_to_play = if opt.speech_speed != 1.0 {
-                                        // println!("Adjusting audio speed...");
-                                        // sink.set_speed(opt.speech_speed);
-
-                                        let audio_to_speed_up: PathBuf =
-                                            PathBuf::from("./data/chat.mp3");
-                                        let sped_up_audio_path: PathBuf =
-                                            PathBuf::from("./data/adjusted_speed.mp3");
-
-                                        adjust_audio_file_speed(
-                                            audio_to_speed_up.as_path(),
-                                            sped_up_audio_path.as_path(),
-                                            opt.speech_speed,
-                                        );
-                                        sped_up_audio_path
-                                    } else {
-                                        PathBuf::from("./data/chat.mp3")
-                                    };
-
-                                    let file = std::fs::File::open(file_to_play).unwrap();
-                                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-
-                                    // let beep1 = stream_handle.play_once(BufReader::new(file)).unwrap();
-                                    // beep1.set_volume(0.2);
-                                    println!("{}", "Speaking...".truecolor(128, 128, 128));
-
-                                    sink.play();
-                                }
+                                break ai_content;
                             }
+                            None => println!("No content"),
                         }
-                        _ => (),
+                    };
+
+                    // Turn AI's response into speech
+                    {
+                        let request = CreateSpeechRequestArgs::default()
+                            .input(ai_content)
+                            .voice(Voice::Echo)
+                            .model(SpeechModel::Tts1)
+                            .build()
+                            .unwrap();
+
+                        let response = runtime.block_on(client.audio().speech(request)).unwrap();
+
+                        runtime.block_on(response.save("./data/chat.mp3")).unwrap();
+                    }
+
+                    // play sound of AI speech
+                    {
+                        let file_to_play = if opt.speech_speed != 1.0 {
+                            // println!("Adjusting audio speed...");
+                            // ai_voice_sink.set_speed(opt.speech_speed);
+
+                            let audio_to_speed_up: PathBuf = PathBuf::from("./data/chat.mp3");
+                            let sped_up_audio_path: PathBuf =
+                                PathBuf::from("./data/adjusted_speed.mp3");
+
+                            adjust_audio_file_speed(
+                                audio_to_speed_up.as_path(),
+                                sped_up_audio_path.as_path(),
+                                opt.speech_speed,
+                            );
+                            sped_up_audio_path
+                        } else {
+                            PathBuf::from("./data/chat.mp3")
+                        };
+
+                        let file = std::fs::File::open(file_to_play).unwrap();
+                        ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+
+                        // let beep1 = stream_handle.play_once(BufReader::new(file)).unwrap();
+                        // beep1.set_volume(0.2);
+                        println!("{}", "Speaking...".truecolor(128, 128, 128));
+
+                        ai_voice_sink.play();
                     }
                 }
             });
