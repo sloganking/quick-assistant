@@ -28,6 +28,7 @@ use rdev::{listen, Event};
 use record::rec;
 use std::error::Error;
 use std::time::Duration;
+use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -406,7 +407,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             Ok(())
         }
-        // Run transcription
+        // Run AI
         None => {
             // figure out ptt key
             let ptt_key = match opt.ptt_key {
@@ -447,13 +448,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             // It then sends the path of the recorded audio file to the AI thread.
             thread::spawn(move || {
                 let mut recorder = rec::Recorder::new();
-                let tmp_dir = tempdir().unwrap();
-                let voice_tmp_path = tmp_dir.path().join("voice_tmp.wav");
-
                 let mut recording_start = std::time::SystemTime::now();
                 let mut key_pressed = false;
                 let key_to_check = ptt_key;
-
+                let tmp_dir = tempdir().unwrap();
+                let mut voice_tmp_path_option: Option<PathBuf> = None;
                 for event in rx.iter() {
                     // println!("Received: {:?}", event);
                     match event.event_type {
@@ -463,6 +462,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 // handle key press
 
                                 ai_voice_sink.stop();
+
+                                let random_filename = format!("{}.wav", Uuid::new_v4());
+                                let voice_tmp_path = tmp_dir.path().join(random_filename);
+                                voice_tmp_path_option = Some(voice_tmp_path.clone());
 
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
@@ -500,9 +503,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 if elapsed.as_secs_f32() < 0.2 {
                                     println!("Recording too short");
                                     continue;
-                                }
+                                };
 
-                                recording_tx.send(voice_tmp_path.clone()).unwrap();
+                                if let Some(voice_tmp_path) = voice_tmp_path_option.take() {
+                                    recording_tx.send(voice_tmp_path.clone()).unwrap();
+                                }
                             }
                         }
                         _ => (),
