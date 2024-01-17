@@ -409,6 +409,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         // Run AI
         None => {
+            // Fail if voice speed out of range
+            if opt.speech_speed < 0.5 || opt.speech_speed > 100.0 {
+                println!("Speech speed must be between 0.5 and 100.0");
+                return Ok(());
+            }
+
             // figure out ptt key
             let ptt_key = match opt.ptt_key {
                 Some(ptt_key) => ptt_key.into(),
