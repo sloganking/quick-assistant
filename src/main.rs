@@ -9,6 +9,7 @@ use tempfile::tempdir;
 mod transcribe;
 use chrono::Local;
 use std::thread;
+use tempfile::Builder;
 use transcribe::trans;
 mod record;
 use async_openai::{
@@ -342,7 +343,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let _ = dotenv();
 
-    const AUDIO_TO_SPEED_UP: &str = "./data/chat.mp3";
+    // prepair temp files for AI speech
+    let audio_to_speed_up = Builder::new()
+        .prefix("quick-assist-ai-voice")
+        .suffix(".mp3")
+        .rand_bytes(16)
+        .tempfile()?;
+    let sped_up_audio_path = Builder::new()
+        .prefix("quick-assist-ai-voice-sped-up")
+        .suffix(".mp3")
+        .rand_bytes(16)
+        .tempfile()
+        .unwrap();
 
     match opt.subcommands {
         Some(subcommand) => {
@@ -619,23 +631,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         let response = runtime.block_on(client.audio().speech(request)).unwrap();
 
-                        runtime.block_on(response.save(AUDIO_TO_SPEED_UP)).unwrap();
+                        runtime
+                            .block_on(response.save(audio_to_speed_up.path()))
+                            .unwrap();
                     }
 
                     // play sound of AI speech
                     {
                         let file_to_play = if opt.speech_speed != 1.0 {
-                            let sped_up_audio_path: PathBuf =
-                                PathBuf::from("./data/adjusted_speed.mp3");
-
                             adjust_audio_file_speed(
-                                PathBuf::from(AUDIO_TO_SPEED_UP).as_path(),
-                                sped_up_audio_path.as_path(),
+                                audio_to_speed_up.path(),
+                                sped_up_audio_path.path(),
                                 opt.speech_speed,
                             );
-                            sped_up_audio_path
+                            sped_up_audio_path.path()
                         } else {
-                            PathBuf::from(AUDIO_TO_SPEED_UP)
+                            audio_to_speed_up.path()
                         };
 
                         let file = std::fs::File::open(file_to_play).unwrap();
