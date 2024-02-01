@@ -1,11 +1,12 @@
 use anyhow::Context;
 use dotenvy::dotenv;
 use std::env;
-use std::io::BufReader;
+use std::fs::File;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use tempfile::tempdir;
+use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
 use chrono::Local;
 use std::thread;
@@ -339,9 +340,39 @@ fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
     };
 }
 
+/// Creates a temporary file from a byte slice and returns the path to the file.
+fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
+    let temp_file = Builder::new()
+        .prefix("temp-file")
+        .suffix(extension)
+        .rand_bytes(16)
+        .tempfile()
+        .unwrap();
+
+    let mut file = File::create(temp_file.path()).unwrap();
+    file.write_all(bytes).unwrap();
+
+    println!("Temp file created: {:?}", temp_file.path());
+    println!("is file: {:?}", temp_file.path().is_file());
+
+    temp_file
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let _ = dotenv();
+
+    let (audio_playing_tx, audio_playing_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
+        flume::unbounded();
+
+    let play_audio = move |path: &Path| {
+        audio_playing_tx.send(path.to_path_buf()).unwrap();
+    };
+
+    let failed_temp_file =
+        create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3");
+
+    // play_audio(&failed_temp_file.path());
 
     // prepair temp files for AI speech
     let audio_to_speed_up = Builder::new()
@@ -544,6 +575,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 "Error: Failed to transcribe audio due to timeout: {:?}",
                                 err
                             );
+
+                            play_audio(&failed_temp_file.path());
+
                             continue;
                         }
                     };
@@ -594,18 +628,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .build()
                             .unwrap();
 
-                        let response_message = runtime
-                            .block_on(future::timeout(
-                                Duration::from_secs(10),
-                                client.chat().create(request),
-                            ))
-                            .unwrap()
-                            .unwrap()
-                            .choices
-                            .first()
-                            .unwrap()
-                            .message
-                            .clone();
+                        let response_message = match runtime.block_on(future::timeout(
+                            Duration::from_secs(10),
+                            client.chat().create(request),
+                        )) {
+                            Ok(transcription_result) => transcription_result,
+                            Err(err) => {
+                                println!(
+                                    "Error: Failed to get ai_content due to timeout: {:?}",
+                                    err
+                                );
+
+                                play_audio(&failed_temp_file.path());
+
+                                continue;
+                            }
+                        }
+                        .unwrap()
+                        .choices
+                        .first()
+                        .unwrap()
+                        .message
+                        .clone();
 
                         match response_message.content {
                             Some(ai_content) => {
@@ -633,21 +677,41 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .build()
                             .unwrap();
 
-                        let response = runtime
-                            .block_on(future::timeout(
-                                Duration::from_secs(10),
-                                client.audio().speech(request),
-                            ))
-                            .unwrap()
-                            .unwrap();
+                        let response = match runtime.block_on(future::timeout(
+                            Duration::from_secs(10),
+                            client.audio().speech(request),
+                        )) {
+                            Ok(transcription_result) => transcription_result,
+                            Err(err) => {
+                                println!(
+                                    "Error: Failed to turn text to speech due to timeout: {:?}",
+                                    err
+                                );
 
-                        runtime
-                            .block_on(future::timeout(
-                                Duration::from_secs(10),
-                                response.save(audio_to_speed_up.path()),
-                            ))
-                            .unwrap()
-                            .unwrap();
+                                play_audio(&failed_temp_file.path());
+
+                                continue;
+                            }
+                        }
+                        .unwrap();
+
+                        match runtime.block_on(future::timeout(
+                            Duration::from_secs(10),
+                            response.save(audio_to_speed_up.path()),
+                        )) {
+                            Ok(transcription_result) => transcription_result,
+                            Err(err) => {
+                                println!(
+                                    "Error: Failed to save ai speech to file due to timeout: {:?}",
+                                    err
+                                );
+
+                                play_audio(&failed_temp_file.path());
+
+                                continue;
+                            }
+                        }
+                        .unwrap();
                     }
 
                     // play sound of AI speech
@@ -670,6 +734,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         ai_voice_sink.play();
                     }
+                }
+            });
+
+            // Create the audio playing thread
+            // Playing audio has it's own dedicated thread because I wanted to be able to play audio
+            // by passing an audio file path to a function. But the audio playing function needs to
+            // have the sink and stream variable not be dropped after the end of the function. So I
+            // made the sink and stream variables global to the main function. But then I couldn't
+            // pass them to the audio playing function. So I made a thread that listens to a channel
+            // for audio file paths and plays them.
+            thread::spawn(move || {
+                let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+
+                for audio_path in audio_playing_rx.iter() {
+                    let file = std::fs::File::open(audio_path).unwrap();
+                    sink.stop();
+                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    sink.play();
                 }
             });
 
