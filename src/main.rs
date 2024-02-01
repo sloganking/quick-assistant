@@ -780,10 +780,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             // Create the audio playing thread
             // Playing audio has it's own dedicated thread because I wanted to be able to play audio
             // by passing an audio file path to a function. But the audio playing function needs to
-            // have the sink and stream variable not be dropped after the end of the function. So I
-            // made the sink and stream variables global to the main function. But then I couldn't
-            // pass them to the audio playing function. So I made a thread that listens to a channel
-            // for audio file paths and plays them.
+            // have the sink and stream variable not be dropped after the end of the function.
             thread::spawn(move || {
                 let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let sink = rodio::Sink::try_new(&stream_handle).unwrap();
