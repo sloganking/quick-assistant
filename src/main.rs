@@ -56,6 +56,10 @@ struct Opt {
     #[arg(short, long, default_value_t = 1.0)]
     speech_speed: f32,
 
+    /// The voice that the AI will use to speak.
+    #[arg(short, long)]
+    ai_voice: Option<VoiceEnum>,
+
     #[clap(subcommand)]
     pub subcommands: Option<SubCommands>,
 }
@@ -292,6 +296,32 @@ impl From<PTTKey> for rdev::Key {
             PTTKey::KpDelete => rdev::Key::KpDelete,
             PTTKey::Function => rdev::Key::Function,
             PTTKey::Unknown(code) => rdev::Key::Unknown(code),
+        }
+    }
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum VoiceEnum {
+    Alloy,
+    Echo,
+    Fable,
+    Onyx,
+    Nova,
+    Shimmer,
+    #[clap(skip)]
+    Other(String),
+}
+
+impl From<VoiceEnum> for Voice {
+    fn from(item: VoiceEnum) -> Self {
+        match item {
+            VoiceEnum::Alloy => Voice::Alloy,
+            VoiceEnum::Echo => Voice::Echo,
+            VoiceEnum::Fable => Voice::Fable,
+            VoiceEnum::Onyx => Voice::Onyx,
+            VoiceEnum::Nova => Voice::Nova,
+            VoiceEnum::Shimmer => Voice::Shimmer,
+            VoiceEnum::Other(string) => Voice::Other(string),
         }
     }
 }
@@ -680,7 +710,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     {
                         let request = CreateSpeechRequestArgs::default()
                             .input(ai_content)
-                            .voice(Voice::Echo)
+                            .voice(Into::<Voice>::into(
+                                opt.ai_voice.clone().unwrap_or(VoiceEnum::Echo),
+                            ))
                             .model(SpeechModel::Tts1)
                             .build()
                             .unwrap();
