@@ -296,6 +296,10 @@ impl From<PTTKey> for rdev::Key {
     }
 }
 
+fn println_error(err: &str) {
+    println!("{}: {}", "Error".truecolor(255, 0, 0), err);
+}
+
 /// Speeds up an audio file by a factor of `speed`.
 fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
     // ffmpeg -y -i input.mp3 -filter:a "atempo={speed}" -vn output.mp3
@@ -398,7 +402,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     // This will block.
                     if let Err(error) = listen(show_keys_callback) {
-                        println!("Error: {:?}", error)
+                        println_error(&format!("Failed to listen to key presses: {:?}", error));
                     }
                 }
                 SubCommands::ListDevices => {
@@ -414,7 +418,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         let device_name = match device.name() {
                             Ok(name) => name,
                             Err(err) => {
-                                println!("Error: Failed to get device name: {:?}", err);
+                                println_error(&format!("Failed to get device name: {:?}", err));
                                 continue;
                             }
                         };
@@ -493,9 +497,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
                                     Ok(_) => (),
-                                    Err(err) => {
-                                        println!("Error: Failed to start recording: {:?}", err)
-                                    }
+                                    Err(err) => println_error(&format!(
+                                        "Failed to start recording: {:?}",
+                                        err
+                                    )),
                                 }
                             }
                         }
@@ -508,7 +513,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 let elapsed = match recording_start.elapsed() {
                                     Ok(elapsed) => elapsed,
                                     Err(err) => {
-                                        println!("Error: Failed to get elapsed recording time. Skipping transcription: \n\n{}",err);
+                                        println_error(&format!(
+                                            "Failed to get elapsed recording time: {:?}",
+                                            err
+                                        ));
                                         let _ = recorder.stop_recording();
                                         continue;
                                     }
@@ -516,7 +524,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 match recorder.stop_recording() {
                                     Ok(_) => (),
                                     Err(err) => {
-                                        println!("Error: Failed to stop recording: {:?}", err);
+                                        println_error(&format!(
+                                            "Failed to stop recording: {:?}",
+                                            err
+                                        ));
                                         continue;
                                     }
                                 }
@@ -524,7 +535,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 // Whisper API can't handle less than 0.1 seconds of audio.
                                 // So we'll only transcribe if the recording is longer than 0.2 seconds.
                                 if elapsed.as_secs_f32() < 0.2 {
-                                    println!("Recording too short");
+                                    println_error("Recording too short");
                                     continue;
                                 };
 
@@ -568,10 +579,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     )) {
                         Ok(transcription_result) => transcription_result,
                         Err(err) => {
-                            println!(
-                                "Error: Failed to transcribe audio due to timeout: {:?}",
+                            println_error(&format!(
+                                "Failed to transcribe audio due to timeout: {:?}",
                                 err
-                            );
+                            ));
 
                             play_audio(&failed_temp_file.path());
 
@@ -582,7 +593,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut transcription = match transcription_result {
                         Ok(transcription) => transcription,
                         Err(err) => {
-                            println!("Error: Failed to transcribe audio: {:?}", err);
+                            println_error(&format!("Failed to transcribe audio: {:?}", err));
                             continue;
                         }
                     };
@@ -631,10 +642,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         )) {
                             Ok(transcription_result) => transcription_result,
                             Err(err) => {
-                                println!(
-                                    "Error: Failed to get ai_content due to timeout: {:?}",
+                                println_error(&format!(
+                                    "Failed to get ai_content due to timeout: {:?}",
                                     err
-                                );
+                                ));
 
                                 play_audio(&failed_temp_file.path());
 
@@ -680,10 +691,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         )) {
                             Ok(transcription_result) => transcription_result,
                             Err(err) => {
-                                println!(
-                                    "Error: Failed to turn text to speech due to timeout: {:?}",
+                                println_error(&format!(
+                                    "Failed to turn text to speech due to timeout: {:?}",
                                     err
-                                );
+                                ));
 
                                 play_audio(&failed_temp_file.path());
 
@@ -698,10 +709,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         )) {
                             Ok(transcription_result) => transcription_result,
                             Err(err) => {
-                                println!(
-                                    "Error: Failed to save ai speech to file due to timeout: {:?}",
+                                println_error(&format!(
+                                    "Failed to save ai speech to file due to timeout: {:?}",
                                     err
-                                );
+                                ));
 
                                 play_audio(&failed_temp_file.path());
 
@@ -761,7 +772,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // This will block.
                 if let Err(error) = listen(callback) {
-                    println!("Error: {:?}", error)
+                    println_error(&format!("Failed to listen to key presses: {:?}", error));
                 }
             }
 
