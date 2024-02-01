@@ -595,7 +595,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .unwrap();
 
                         let response_message = runtime
-                            .block_on(client.chat().create(request))
+                            .block_on(future::timeout(
+                                Duration::from_secs(10),
+                                client.chat().create(request),
+                            ))
+                            .unwrap()
                             .unwrap()
                             .choices
                             .first()
@@ -629,10 +633,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .build()
                             .unwrap();
 
-                        let response = runtime.block_on(client.audio().speech(request)).unwrap();
+                        let response = runtime
+                            .block_on(future::timeout(
+                                Duration::from_secs(10),
+                                client.audio().speech(request),
+                            ))
+                            .unwrap()
+                            .unwrap();
 
                         runtime
-                            .block_on(response.save(audio_to_speed_up.path()))
+                            .block_on(future::timeout(
+                                Duration::from_secs(10),
+                                response.save(audio_to_speed_up.path()),
+                            ))
+                            .unwrap()
                             .unwrap();
                     }
 
