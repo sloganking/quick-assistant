@@ -352,9 +352,6 @@ fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
     let mut file = File::create(temp_file.path()).unwrap();
     file.write_all(bytes).unwrap();
 
-    println!("Temp file created: {:?}", temp_file.path());
-    println!("is file: {:?}", temp_file.path().is_file());
-
     temp_file
 }
 
