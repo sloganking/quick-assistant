@@ -667,13 +667,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .unwrap();
 
                         let response_message = match runtime.block_on(future::timeout(
-                            Duration::from_secs(10),
+                            Duration::from_secs(15),
                             client.chat().create(request),
                         )) {
                             Ok(transcription_result) => transcription_result,
                             Err(err) => {
                                 println_error(&format!(
-                                    "Failed to get ai_content due to timeout: {:?}",
+                                    "Failed to get ai_content due to timeout: {}",
                                     err
                                 ));
 
@@ -718,7 +718,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .unwrap();
 
                         let response = match runtime.block_on(future::timeout(
-                            Duration::from_secs(10),
+                            Duration::from_secs(15),
                             client.audio().speech(request),
                         )) {
                             Ok(transcription_result) => transcription_result,
