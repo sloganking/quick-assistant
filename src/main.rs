@@ -847,11 +847,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         };
 
                         let file = std::fs::File::open(file_to_play).unwrap();
-                        ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                        // ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
 
                         println!("{}", "Speaking...".truecolor(128, 128, 128));
 
-                        ai_voice_sink.play();
+                        // ai_voice_sink.play();
                     }
                 }
             });
@@ -867,8 +867,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 for audio_path in audio_playing_rx.iter() {
                     let file = std::fs::File::open(audio_path).unwrap();
                     sink.stop();
-                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    sink.play();
+                    // sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    // sink.play();
                 }
             });
 
@@ -885,6 +885,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // receive text to turn into speech and play it
 
                 for ai_text in ai_voice_playing_rx.iter() {
+                    println!("Speaking: {}", ai_text);
                     // Turn AI's response into speech
                     let ai_speech_segment_tempfile = {
                         let request = CreateSpeechRequestArgs::default()
@@ -944,7 +945,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let file = std::fs::File::open(ai_speech_segment_tempfile.path()).unwrap();
                     sink.stop();
                     sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    sink.play();
+                    // sink.play();
                     sink.sleep_until_end();
                 }
             });
