@@ -438,7 +438,7 @@ impl SentenceAccumulator {
         // Trim the sentence before processing to remove any leading or trailing whitespace.
         let sentence = self.buffer.trim();
         if !sentence.is_empty() {
-            println!("Complete sentence: {}", sentence);
+            println!("{}{}", "Complete sentence: ".yellow(), sentence);
 
             // Turn the sentence into speech
             self.ai_voice_channel_tx.send(sentence.to_string()).unwrap();
