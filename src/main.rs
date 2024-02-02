@@ -667,7 +667,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .unwrap();
 
                         let response_message = match runtime.block_on(future::timeout(
-                            Duration::from_secs(15),
+                            Duration::from_secs(20),
                             client.chat().create(request),
                         )) {
                             Ok(transcription_result) => transcription_result,
@@ -691,7 +691,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         match response_message.content {
                             Some(ai_content) => {
-                                println!("{}", "AI: ".truecolor(255, 0, 0));
+                                println!("{}", "AI: ".truecolor(0, 0, 255));
                                 println!("{}", ai_content);
                                 message_history.push(
                                     ChatCompletionRequestAssistantMessageArgs::default()
