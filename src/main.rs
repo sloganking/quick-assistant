@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
 use chrono::Local;
+use futures::stream::FuturesOrdered;
+use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
 use transcribe::trans;
@@ -412,7 +414,7 @@ impl SentenceAccumulator {
         for char in token.chars() {
             self.buffer.push(char);
 
-            if self.buffer.len() > 100 {
+            if self.buffer.len() > 50 {
                 if let Some(second_to_last_char) = get_second_to_last_char(&self.buffer) {
                     if
                     // If the second to last character is a sentence ending character
@@ -846,10 +848,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             audio_to_speed_up.path()
                         };
 
-                        let file = std::fs::File::open(file_to_play).unwrap();
+                        // let file = std::fs::File::open(file_to_play).unwrap();
                         // ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
 
-                        println!("{}", "Speaking...".truecolor(128, 128, 128));
+                        // println!("{}", "Speaking...".truecolor(128, 128, 128));
 
                         // ai_voice_sink.play();
                     }
@@ -884,69 +886,115 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // receive text to turn into speech and play it
 
-                for ai_text in ai_voice_playing_rx.iter() {
-                    println!("Speaking: {}", ai_text);
+                async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
+                    // let runtime = tokio::runtime::Runtime::new()
+                    //     .context("Failed to create tokio runtime")
+                    //     .unwrap();
+                    let client = Client::new();
+
                     // Turn AI's response into speech
-                    let ai_speech_segment_tempfile = {
-                        let request = CreateSpeechRequestArgs::default()
-                            .input(ai_text)
-                            .voice(Voice::Echo)
-                            .model(SpeechModel::Tts1)
-                            .build()
-                            .unwrap();
 
-                        let response = match runtime.block_on(future::timeout(
-                            Duration::from_secs(15),
-                            client.audio().speech(request),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to turn text to speech due to timeout: {:?}",
-                                    err
-                                ));
-
-                                // play_audio(&failed_temp_file.path());
-
-                                continue;
-                            }
-                        }
+                    let request = CreateSpeechRequestArgs::default()
+                        .input(ai_text)
+                        .voice(Voice::Echo)
+                        .model(SpeechModel::Tts1)
+                        .build()
                         .unwrap();
 
-                        let ai_speech_segment_tempfile = Builder::new()
-                            .prefix("ai-speech-segment")
-                            .suffix(".mp3")
-                            .rand_bytes(16)
-                            .tempfile()
-                            .unwrap();
+                    let response = match future::timeout(
+                        Duration::from_secs(15),
+                        client.audio().speech(request),
+                    )
+                    .await
+                    {
+                        Ok(transcription_result) => transcription_result,
+                        Err(err) => {
+                            println_error(&format!(
+                                "Failed to turn text to speech due to timeout: {:?}",
+                                err
+                            ));
 
-                        match runtime.block_on(future::timeout(
-                            Duration::from_secs(10),
-                            response.save(ai_speech_segment_tempfile.path()),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to save ai speech to file due to timeout: {:?}",
-                                    err
-                                ));
+                            // play_audio(&failed_temp_file.path());
 
-                                // play_audio(&failed_temp_file.path());
-
-                                continue;
-                            }
+                            // continue;
+                            return None;
                         }
+                    }
+                    .unwrap();
+
+                    let ai_speech_segment_tempfile = Builder::new()
+                        .prefix("ai-speech-segment")
+                        .suffix(".mp3")
+                        .rand_bytes(16)
+                        .tempfile()
                         .unwrap();
 
-                        ai_speech_segment_tempfile
+                    let _ = match future::timeout(
+                        Duration::from_secs(10),
+                        response.save(ai_speech_segment_tempfile.path()),
+                    )
+                    .await
+                    {
+                        Ok(transcription_result) => transcription_result,
+                        Err(err) => {
+                            println_error(&format!(
+                                "Failed to save ai speech to file due to timeout: {:?}",
+                                err
+                            ));
+
+                            // play_audio(&failed_temp_file.path());
+
+                            // continue;
+                            return None;
+                        }
                     };
 
-                    // play the sound of AI speech
-                    let file = std::fs::File::open(ai_speech_segment_tempfile.path()).unwrap();
-                    sink.stop();
-                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    // sink.play();
-                    sink.sleep_until_end();
+                    Some(ai_speech_segment_tempfile)
+                }
+
+                let mut futures_ordered = FuturesOrdered::new();
+
+                for ai_text in ai_voice_playing_rx.iter() {
+                    println!("Speaking: {}", ai_text);
+
+                    // let ai_text2 = ai_text.to_string();
+
+                    futures_ordered.push_back(turn_text_to_speech(ai_text));
+
+                    while let Ok(ai_text) = ai_voice_playing_rx.try_recv() {
+                        futures_ordered.push_back(turn_text_to_speech(ai_text));
+                    }
+
+                    while let Some(ai_speech_segment_tempfile_option) =
+                        runtime.block_on(futures_ordered.next())
+                    {
+                        // for ai_text in ai_voice_playing_rx.iter() {
+                        //     futures_ordered.push_back(turn_text_to_speech(ai_text));
+                        // }
+
+                        println!("while");
+                        while let Ok(ai_text) = ai_voice_playing_rx.try_recv() {
+                            futures_ordered.push_back(turn_text_to_speech(ai_text));
+                        }
+                        println!("after while");
+
+                        match ai_speech_segment_tempfile_option {
+                            Some(ai_speech_segment_tempfile) => {
+                                // play the sound of AI speech
+                                let file =
+                                    std::fs::File::open(ai_speech_segment_tempfile.path()).unwrap();
+                                sink.stop();
+                                sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                                // sink.play();
+                                println!("sink.sleep_until_end();");
+                                sink.sleep_until_end();
+                            }
+                            None => {
+                                // play_audio(&failed_temp_file.path());
+                                println_error("failed to turn text to speech");
+                            }
+                        }
+                    }
                 }
             });
 
