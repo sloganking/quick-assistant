@@ -389,6 +389,64 @@ fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
     temp_file
 }
 
+fn get_second_to_last_char(s: &str) -> Option<char> {
+    s.chars().rev().nth(1)
+}
+
+struct SentenceAccumulator {
+    buffer: String,
+    sentence_end_chars: Vec<char>,
+}
+
+impl SentenceAccumulator {
+    fn new() -> Self {
+        SentenceAccumulator {
+            buffer: String::new(),
+            sentence_end_chars: vec!['.', '?', '!'],
+        }
+    }
+
+    fn add_token(&mut self, token: &str) {
+        for char in token.chars() {
+            self.buffer.push(char);
+
+            if self.buffer.len() > 100 {
+                if let Some(second_to_last_char) = get_second_to_last_char(&self.buffer) {
+                    if
+                    // If the second to last character is a sentence ending character
+                    self.sentence_end_chars.contains(&second_to_last_char)
+                    // and the last character is whitespace.
+                        && self
+                            .buffer
+                            .chars()
+                            .last()
+                            .map_or(false, |c| c.is_whitespace())
+                    {
+                        self.process_sentence();
+                        self.buffer.clear();
+                    }
+                }
+            }
+        }
+    }
+
+    fn process_sentence(&self) {
+        // Trim the sentence before processing to remove any leading or trailing whitespace.
+        let sentence = self.buffer.trim();
+        if !sentence.is_empty() {
+            println!("Complete sentence: {}", sentence);
+        }
+    }
+
+    /// Called at the end of the conversation to process the last sentence.
+    /// This is necessary since the last character may not be whitespace preceded
+    /// by a sentence ending character.
+    fn complete_sentence(&mut self) {
+        self.process_sentence();
+        self.buffer.clear();
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let _ = dotenv();
@@ -588,6 +646,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
+                let mut sentence_accumulator = SentenceAccumulator::new();
+
                 message_history.push(
                     ChatCompletionRequestSystemMessageArgs::default()
                         .content("You are a desktop voice assistant. Your responses will be spoken by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more', ask 'why did you ask?', and more personable questions like a real human relationship.")
@@ -705,6 +765,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                             None => println!("No content"),
                         }
                     };
+
+                    // sentence_accumulator.add_token(&ai_content);
+                    for char in ai_content.chars() {
+                        sentence_accumulator.add_token(&char.to_string());
+                    }
+                    sentence_accumulator.complete_sentence();
 
                     // Turn AI's response into speech
                     {
