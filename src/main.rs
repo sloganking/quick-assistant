@@ -632,7 +632,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
             // It then sends the path of the recorded audio file to the AI thread.
-            thread::spawn(move || {
+            tokio::spawn(async move {
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
                 let mut key_pressed = false;
@@ -865,7 +865,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Playing audio has it's own dedicated thread because I wanted to be able to play audio
             // by passing an audio file path to a function. But the audio playing function needs to
             // have the sink and stream variable not be dropped after the end of the function.
-            thread::spawn(move || {
+            tokio::spawn(async move {
                 let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
@@ -911,7 +911,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             });
 
             // Create the ai voice audio playing thread
-            thread::spawn(move || {
+            tokio::spawn(async move {
                 let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
