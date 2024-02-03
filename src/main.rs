@@ -458,7 +458,7 @@ impl SentenceAccumulator {
     }
 }
 
-async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
+async fn turn_text_to_speech(ai_text: String, speed: f32) -> Option<NamedTempFile> {
     let client = Client::new();
 
     // Turn AI's response into speech
@@ -514,6 +514,23 @@ async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
         }
     };
 
+    if speed != 1.0 {
+        let sped_up_audio_path = Builder::new()
+            .prefix("quick-assist-ai-voice-sped-up")
+            .suffix(".mp3")
+            .rand_bytes(16)
+            .tempfile()
+            .unwrap();
+
+        adjust_audio_file_speed(
+            ai_speech_segment_tempfile.path(),
+            sped_up_audio_path.path(),
+            speed as f32,
+        );
+
+        return Some(sped_up_audio_path);
+    }
+
     Some(ai_speech_segment_tempfile)
 }
 
@@ -534,21 +551,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let failed_temp_file =
         create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3");
-
-    // play_audio(&failed_temp_file.path());
-
-    // prepair temp files for AI speech
-    let audio_to_speed_up = Builder::new()
-        .prefix("quick-assist-ai-voice")
-        .suffix(".mp3")
-        .rand_bytes(16)
-        .tempfile()?;
-    let sped_up_audio_path = Builder::new()
-        .prefix("quick-assist-ai-voice-sped-up")
-        .suffix(".mp3")
-        .rand_bytes(16)
-        .tempfile()
-        .unwrap();
 
     match opt.subcommands {
         Some(subcommand) => {
@@ -639,7 +641,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let sentence_accumulator = Arc::new(Mutex::new(SentenceAccumulator::new(ai_tts_tx)));
 
-            let mut futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
+            let futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
 
             let llm_should_stop_mutex = Arc::new(Mutex::new(false));
 
@@ -841,12 +843,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .into(),
                     );
 
-                    let mut ai_content = String::new();
-
                     // repeatedly create request until it's answered
                     let mut displayed_ai_label = false;
                     'request: loop {
-                        ai_content = String::new();
+                        let mut ai_content = String::new();
                         let request = CreateChatCompletionRequestArgs::default()
                             // .model("gpt-3.5-turbo")
                             .model("gpt-4-1106-preview")
@@ -998,7 +998,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     // Queue up any text segments to be turned into speech.
                     for ai_text in ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(ai_text));
+                        futures_ordered.push_back(turn_text_to_speech(ai_text, opt.speech_speed));
                     }
 
                     // Send any ready audio segments to the ai voice audio playing thread
