@@ -859,7 +859,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .block_on(client.chat().create_stream(request))
                             .unwrap();
 
-                        while let Some(result) = runtime.block_on(stream.next()) {
+                        // let test = ;
+
+                        while let Some(result) = {
+                            match runtime
+                                .block_on(future::timeout(Duration::from_secs(15), stream.next()))
+                            {
+                                Ok(result) => result,
+                                Err(err) => {
+                                    println_error(&format!(
+                                        "Failed to get response from AI due to timeout: {:?}",
+                                        err
+                                    ));
+
+                                    play_audio(&failed_temp_file.path());
+
+                                    break 'request;
+                                }
+                            }
+                        } {
                             // println!("result: {:#?}",result);
 
                             let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
