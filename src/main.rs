@@ -873,7 +873,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 for audio_path in audio_playing_rx.iter() {
                     let file = std::fs::File::open(audio_path).unwrap();
                     sink.stop();
-                    // sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
                 }
             });
