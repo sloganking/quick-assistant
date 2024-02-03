@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
 use chrono::Local;
@@ -452,6 +452,10 @@ impl SentenceAccumulator {
         self.process_sentence();
         self.buffer.clear();
     }
+
+    fn clear_buffer(&mut self) {
+        self.buffer.clear();
+    }
 }
 
 async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
@@ -633,6 +637,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 flume::Receiver<NamedTempFile>,
             ) = flume::unbounded();
 
+            let mut sentence_accumulator =
+                Arc::new(Mutex::new(SentenceAccumulator::new(ai_tts_tx)));
+
             let thread_ai_voice_sink = ai_voice_sink.clone();
 
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
@@ -640,6 +647,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
             // It then sends the path of the recorded audio file to the AI thread.
+            let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
+            let thread_ai_tts_rx = ai_tts_rx.clone();
             tokio::spawn(async move {
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
@@ -656,11 +665,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 // stop the AI voice from speaking
                                 {
+                                    // stop the LLM
+                                    // ???how???
+
+                                    // clear the sentence accumulator
+                                    let mut thread_sentence_accumulator =
+                                        thread_sentence_accumulator_mutex.lock().unwrap();
+                                    thread_sentence_accumulator.clear_buffer();
+                                    drop(thread_sentence_accumulator);
+
                                     // empty channel of all text messages queued up to be turned into audio speech
-                                    for _ in thread_ai_audio_playing_rx.try_iter() {}
+                                    for _ in thread_ai_tts_rx.try_iter() {}
 
                                     // empty the futures currently turning text to sound
                                     // futures_ordered = FuturesOrdered::new();
+
+                                    // clear the channel that passes audio files to the ai voice audio playing thread
+                                    for _ in thread_ai_audio_playing_rx.try_iter() {}
 
                                     // stop the AI voice from speaking the current sentence
                                     thread_ai_voice_sink.stop();
@@ -730,11 +751,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Create AI thread
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
+            let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
             thread::spawn(move || {
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
-                let mut sentence_accumulator = SentenceAccumulator::new(ai_tts_tx);
+                // let mut sentence_accumulator = SentenceAccumulator::new(ai_tts_tx);
 
                 message_history.push(
                     ChatCompletionRequestSystemMessageArgs::default()
@@ -835,7 +857,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             // write!(lock, "{}", content).unwrap();
                                             print!("{}", content);
                                             ai_content += content;
-                                            sentence_accumulator.add_token(&content);
+                                            // sentence_accumulator.add_token(&content);
+
+                                            let mut thread_sentence_accumulator =
+                                                thread_sentence_accumulator_mutex.lock().unwrap();
+                                            thread_sentence_accumulator.add_token(&content);
+                                            drop(thread_sentence_accumulator);
                                         }
                                     });
                                 }
@@ -875,7 +902,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     // Tells the ai voice to speak the remaining text in the buffer
-                    sentence_accumulator.complete_sentence();
+                    // sentence_accumulator.complete_sentence();
+
+                    let mut thread_sentence_accumulator =
+                        thread_sentence_accumulator_mutex.lock().unwrap();
+                    thread_sentence_accumulator.complete_sentence();
+                    drop(thread_sentence_accumulator);
                 }
             });
 
@@ -925,9 +957,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Create the ai voice audio playing thread
             let thread_ai_voice_sink = ai_voice_sink.clone();
+            let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             tokio::spawn(async move {
                 // println!("Waiting for ai_voice_playing_rx");
-                for ai_speech_segment in ai_audio_playing_rx.iter() {
+                for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     thread_ai_voice_sink.stop();
