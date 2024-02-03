@@ -1,5 +1,9 @@
 pub mod speakstream {
+    use futures::stream::FuturesOrdered;
+    use futures::Future;
+    use std::pin::Pin;
     use std::sync::{Arc, Mutex};
+    use tempfile::NamedTempFile;
 
     /// SentenceAccumulator is a struct that accumulates tokens into sentences
     /// before sending the sentences to the AI voice channel.
@@ -70,7 +74,7 @@ pub mod speakstream {
     pub struct SpeakStream {
         sentence_accumulator: SentenceAccumulator,
         futures_ordered_mutex:
-            Arc<Mutex<FuturesOrdered<impl Future<Output = Option<NamedTempFile>>>>>,
+            Arc<Mutex<FuturesOrdered<Pin<Box<dyn Future<Output = Option<NamedTempFile>>>>>>>,
     }
 
     impl SpeakStream {
