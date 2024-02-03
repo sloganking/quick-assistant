@@ -32,6 +32,8 @@ use record::rec;
 use std::error::Error;
 use std::time::Duration;
 use uuid::Uuid;
+mod speakstream;
+use speakstream::speakstream as ss;
 
 #[derive(Parser, Debug)]
 #[command(version)]
