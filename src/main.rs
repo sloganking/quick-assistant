@@ -637,8 +637,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 flume::Receiver<NamedTempFile>,
             ) = flume::unbounded();
 
-            let mut sentence_accumulator =
-                Arc::new(Mutex::new(SentenceAccumulator::new(ai_tts_tx)));
+            let sentence_accumulator = Arc::new(Mutex::new(SentenceAccumulator::new(ai_tts_tx)));
+
+            let mut futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
 
             let thread_ai_voice_sink = ai_voice_sink.clone();
 
@@ -649,6 +650,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // It then sends the path of the recorded audio file to the AI thread.
             let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
             let thread_ai_tts_rx = ai_tts_rx.clone();
+            let thread_futures_ordered_mutex = futures_ordered_mutex.clone();
             tokio::spawn(async move {
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
@@ -678,7 +680,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     for _ in thread_ai_tts_rx.try_iter() {}
 
                                     // empty the futures currently turning text to sound
-                                    // futures_ordered = FuturesOrdered::new();
+                                    let mut futures_ordered =
+                                        thread_futures_ordered_mutex.lock().unwrap();
+                                    *futures_ordered = FuturesOrdered::new();
+                                    drop(futures_ordered);
 
                                     // clear the channel that passes audio files to the ai voice audio playing thread
                                     for _ in thread_ai_audio_playing_rx.try_iter() {}
@@ -930,17 +935,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Create text to speech conversion thread
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
-            tokio::spawn(async move {
-                let mut futures_ordered = FuturesOrdered::new();
+            let thread_futures_ordered_mutex = futures_ordered_mutex.clone();
+            thread::spawn(move || {
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime")
+                    .unwrap();
 
                 loop {
+                    let mut futures_ordered = thread_futures_ordered_mutex.lock().unwrap();
+
                     // Queue up any text segments to be turned into speech.
                     for ai_text in ai_tts_rx.try_iter() {
                         futures_ordered.push_back(turn_text_to_speech(ai_text));
                     }
 
                     // Send any ready audio segments to the ai voice audio playing thread
-                    while let Some(tempfile_option) = futures_ordered.next().await {
+                    while let Some(tempfile_option) = runtime.block_on(futures_ordered.next()) {
                         match tempfile_option {
                             Some(tempfile) => {
                                 // send tempfile to ai voice audio playing thread
@@ -952,6 +962,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                     }
+                    drop(futures_ordered);
                 }
             });
 
