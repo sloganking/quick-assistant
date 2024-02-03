@@ -454,6 +454,65 @@ impl SentenceAccumulator {
     }
 }
 
+async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
+    let client = Client::new();
+
+    // Turn AI's response into speech
+
+    let request = CreateSpeechRequestArgs::default()
+        .input(ai_text)
+        .voice(Voice::Echo)
+        .model(SpeechModel::Tts1)
+        .build()
+        .unwrap();
+
+    let response =
+        match future::timeout(Duration::from_secs(15), client.audio().speech(request)).await {
+            Ok(transcription_result) => transcription_result,
+            Err(err) => {
+                println_error(&format!(
+                    "Failed to turn text to speech due to timeout: {:?}",
+                    err
+                ));
+
+                // play_audio(&failed_temp_file.path());
+
+                // continue;
+                return None;
+            }
+        }
+        .unwrap();
+
+    let ai_speech_segment_tempfile = Builder::new()
+        .prefix("ai-speech-segment")
+        .suffix(".mp3")
+        .rand_bytes(16)
+        .tempfile()
+        .unwrap();
+
+    let _ = match future::timeout(
+        Duration::from_secs(10),
+        response.save(ai_speech_segment_tempfile.path()),
+    )
+    .await
+    {
+        Ok(transcription_result) => transcription_result,
+        Err(err) => {
+            println_error(&format!(
+                "Failed to save ai speech to file due to timeout: {:?}",
+                err
+            ));
+
+            // play_audio(&failed_temp_file.path());
+
+            // continue;
+            return None;
+        }
+    };
+
+    Some(ai_speech_segment_tempfile)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
@@ -827,69 +886,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
             tokio::spawn(async move {
-                async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
-                    let client = Client::new();
-
-                    // Turn AI's response into speech
-
-                    let request = CreateSpeechRequestArgs::default()
-                        .input(ai_text)
-                        .voice(Voice::Echo)
-                        .model(SpeechModel::Tts1)
-                        .build()
-                        .unwrap();
-
-                    let response = match future::timeout(
-                        Duration::from_secs(15),
-                        client.audio().speech(request),
-                    )
-                    .await
-                    {
-                        Ok(transcription_result) => transcription_result,
-                        Err(err) => {
-                            println_error(&format!(
-                                "Failed to turn text to speech due to timeout: {:?}",
-                                err
-                            ));
-
-                            // play_audio(&failed_temp_file.path());
-
-                            // continue;
-                            return None;
-                        }
-                    }
-                    .unwrap();
-
-                    let ai_speech_segment_tempfile = Builder::new()
-                        .prefix("ai-speech-segment")
-                        .suffix(".mp3")
-                        .rand_bytes(16)
-                        .tempfile()
-                        .unwrap();
-
-                    let _ = match future::timeout(
-                        Duration::from_secs(10),
-                        response.save(ai_speech_segment_tempfile.path()),
-                    )
-                    .await
-                    {
-                        Ok(transcription_result) => transcription_result,
-                        Err(err) => {
-                            println_error(&format!(
-                                "Failed to save ai speech to file due to timeout: {:?}",
-                                err
-                            ));
-
-                            // play_audio(&failed_temp_file.path());
-
-                            // continue;
-                            return None;
-                        }
-                    };
-
-                    Some(ai_speech_segment_tempfile)
-                }
-
                 let mut futures_ordered = FuturesOrdered::new();
 
                 loop {
