@@ -438,12 +438,10 @@ impl SentenceAccumulator {
         // Trim the sentence before processing to remove any leading or trailing whitespace.
         let sentence = self.buffer.trim();
         if !sentence.is_empty() {
-            println!("\n{}{}", "Complete sentence: ".yellow(), sentence);
+            // println!("\n{}{}", "Complete sentence: ".yellow(), sentence);
 
             // Turn the sentence into speech
-            println!("sending message");
             self.ai_voice_channel_tx.send(sentence.to_string()).unwrap();
-            println!("Message sent")
         }
     }
 
@@ -1042,13 +1040,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 let mut futures_ordered = FuturesOrdered::new();
 
-                println!("Waitng for ai_voice_playing_rx");
+                // println!("Waiting for ai_voice_playing_rx");
                 for ai_text in ai_voice_playing_rx.iter() {
-                    println!(
-                        "{}",
-                        "Entered speech loop of ai_voice_playing_rx".truecolor(255, 0, 0)
-                    );
-                    // let ai_text2 = ai_text.to_string();
+                    // println!(
+                    //     "{}",
+                    //     "Entered speech loop of ai_voice_playing_rx".truecolor(255, 0, 0)
+                    // );
 
                     futures_ordered.push_back(turn_text_to_speech(ai_text));
 
@@ -1063,22 +1060,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                         //     futures_ordered.push_back(turn_text_to_speech(ai_text));
                         // }
 
-                        println!("while");
                         while let Ok(ai_text) = ai_voice_playing_rx.try_recv() {
                             futures_ordered.push_back(turn_text_to_speech(ai_text));
                         }
-                        println!("after while");
 
                         match ai_speech_segment_tempfile_option {
                             Some(ai_speech_segment_tempfile) => {
-                                println!("speaking: ");
                                 // play the sound of AI speech
                                 let file =
                                     std::fs::File::open(ai_speech_segment_tempfile.path()).unwrap();
                                 sink.stop();
                                 sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                                 // sink.play();
-                                println!("sink.sleep_until_end();");
+
                                 sink.sleep_until_end();
                             }
                             None => {
