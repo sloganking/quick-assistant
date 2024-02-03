@@ -213,6 +213,7 @@ pub mod speakstream {
         sentence_accumulator: SentenceAccumulator,
         futures_ordered_mutex:
             Arc<Mutex<FuturesOrdered<Pin<Box<dyn Future<Output = Option<NamedTempFile>>>>>>>,
+        // Arc<Mutex<FuturesOrdered<impl Future<Output = Option<NamedTempFile>>>>>,
         ai_voice_sink: Arc<rodio::Sink>,
         stream: OutputStream,
         speech_speed: f32,
