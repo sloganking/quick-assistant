@@ -2,13 +2,15 @@ use anyhow::Context;
 use dotenvy::dotenv;
 use std::env;
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
 use chrono::Local;
+use futures::stream::FuturesOrdered;
+use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
 use transcribe::trans;
@@ -396,13 +398,15 @@ fn get_second_to_last_char(s: &str) -> Option<char> {
 struct SentenceAccumulator {
     buffer: String,
     sentence_end_chars: Vec<char>,
+    ai_voice_channel_tx: flume::Sender<String>,
 }
 
 impl SentenceAccumulator {
-    fn new() -> Self {
+    fn new(channel: flume::Sender<String>) -> Self {
         SentenceAccumulator {
             buffer: String::new(),
             sentence_end_chars: vec!['.', '?', '!'],
+            ai_voice_channel_tx: channel,
         }
     }
 
@@ -410,7 +414,7 @@ impl SentenceAccumulator {
         for char in token.chars() {
             self.buffer.push(char);
 
-            if self.buffer.len() > 100 {
+            if self.buffer.len() > 50 {
                 if let Some(second_to_last_char) = get_second_to_last_char(&self.buffer) {
                     if
                     // If the second to last character is a sentence ending character
@@ -434,7 +438,10 @@ impl SentenceAccumulator {
         // Trim the sentence before processing to remove any leading or trailing whitespace.
         let sentence = self.buffer.trim();
         if !sentence.is_empty() {
-            println!("Complete sentence: {}", sentence);
+            // println!("\n{}{}", "Complete sentence: ".yellow(), sentence);
+
+            // Turn the sentence into speech
+            self.ai_voice_channel_tx.send(sentence.to_string()).unwrap();
         }
     }
 
@@ -445,13 +452,97 @@ impl SentenceAccumulator {
         self.process_sentence();
         self.buffer.clear();
     }
+
+    fn clear_buffer(&mut self) {
+        self.buffer.clear();
+    }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+async fn turn_text_to_speech(ai_text: String, speed: f32) -> Option<NamedTempFile> {
+    let client = Client::new();
+
+    // Turn AI's response into speech
+
+    let request = CreateSpeechRequestArgs::default()
+        .input(ai_text)
+        .voice(Voice::Echo)
+        .model(SpeechModel::Tts1)
+        .build()
+        .unwrap();
+
+    let response =
+        match future::timeout(Duration::from_secs(15), client.audio().speech(request)).await {
+            Ok(transcription_result) => transcription_result,
+            Err(err) => {
+                println_error(&format!(
+                    "Failed to turn text to speech due to timeout: {:?}",
+                    err
+                ));
+
+                // play_audio(&failed_temp_file.path());
+
+                // continue;
+                return None;
+            }
+        }
+        .unwrap();
+
+    let ai_speech_segment_tempfile = Builder::new()
+        .prefix("ai-speech-segment")
+        .suffix(".mp3")
+        .rand_bytes(16)
+        .tempfile()
+        .unwrap();
+
+    let _ = match future::timeout(
+        Duration::from_secs(10),
+        response.save(ai_speech_segment_tempfile.path()),
+    )
+    .await
+    {
+        Ok(transcription_result) => transcription_result,
+        Err(err) => {
+            println_error(&format!(
+                "Failed to save ai speech to file due to timeout: {:?}",
+                err
+            ));
+
+            // play_audio(&failed_temp_file.path());
+
+            // continue;
+            return None;
+        }
+    };
+
+    if speed != 1.0 {
+        let sped_up_audio_path = Builder::new()
+            .prefix("quick-assist-ai-voice-sped-up")
+            .suffix(".mp3")
+            .rand_bytes(16)
+            .tempfile()
+            .unwrap();
+
+        adjust_audio_file_speed(
+            ai_speech_segment_tempfile.path(),
+            sped_up_audio_path.path(),
+            speed as f32,
+        );
+
+        return Some(sped_up_audio_path);
+    }
+
+    Some(ai_speech_segment_tempfile)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let _ = dotenv();
 
     let (audio_playing_tx, audio_playing_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
+        flume::unbounded();
+
+    let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
         flume::unbounded();
 
     let play_audio = move |path: &Path| {
@@ -460,21 +551,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let failed_temp_file =
         create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3");
-
-    // play_audio(&failed_temp_file.path());
-
-    // prepair temp files for AI speech
-    let audio_to_speed_up = Builder::new()
-        .prefix("quick-assist-ai-voice")
-        .suffix(".mp3")
-        .rand_bytes(16)
-        .tempfile()?;
-    let sped_up_audio_path = Builder::new()
-        .prefix("quick-assist-ai-voice-sped-up")
-        .suffix(".mp3")
-        .rand_bytes(16)
-        .tempfile()
-        .unwrap();
 
     match opt.subcommands {
         Some(subcommand) => {
@@ -547,36 +623,82 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return Ok(());
             }
 
-            let (tx, rx): (flume::Sender<Event>, flume::Receiver<Event>) = flume::unbounded();
+            let (key_handler_tx, key_handler_rx): (flume::Sender<Event>, flume::Receiver<Event>) =
+                flume::unbounded();
 
             let (recording_tx, recording_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
                 flume::unbounded();
 
             // Setup vars for playing sound through speakers
             let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-            let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-            let sink = Arc::new(sink);
+            let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
+            let ai_voice_sink = Arc::new(ai_voice_sink);
 
-            let ai_voice_sink = sink.clone();
+            let (ai_audio_playing_tx, ai_audio_playing_rx): (
+                flume::Sender<NamedTempFile>,
+                flume::Receiver<NamedTempFile>,
+            ) = flume::unbounded();
+
+            let sentence_accumulator = Arc::new(Mutex::new(SentenceAccumulator::new(ai_tts_tx)));
+
+            let futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
+
+            let llm_should_stop_mutex = Arc::new(Mutex::new(false));
+
+            let thread_ai_voice_sink = ai_voice_sink.clone();
+
+            let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
 
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
             // It then sends the path of the recorded audio file to the AI thread.
-            thread::spawn(move || {
+            let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
+            let thread_ai_tts_rx = ai_tts_rx.clone();
+            let thread_futures_ordered_mutex = futures_ordered_mutex.clone();
+            let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
+            tokio::spawn(async move {
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
                 let mut key_pressed = false;
                 let key_to_check = ptt_key;
                 let tmp_dir = tempdir().unwrap();
                 let mut voice_tmp_path_option: Option<PathBuf> = None;
-                for event in rx.iter() {
+                for event in key_handler_rx.iter() {
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
                             if key == key_to_check && !key_pressed {
                                 key_pressed = true;
                                 // handle key press
 
-                                ai_voice_sink.stop();
+                                // stop the AI voice from speaking
+                                {
+                                    // stop the LLM
+                                    let mut llm_should_stop =
+                                        thread_llm_should_stop_mutex.lock().unwrap();
+                                    *llm_should_stop = true;
+                                    drop(llm_should_stop);
+
+                                    // clear the sentence accumulator
+                                    let mut thread_sentence_accumulator =
+                                        thread_sentence_accumulator_mutex.lock().unwrap();
+                                    thread_sentence_accumulator.clear_buffer();
+                                    drop(thread_sentence_accumulator);
+
+                                    // empty channel of all text messages queued up to be turned into audio speech
+                                    for _ in thread_ai_tts_rx.try_iter() {}
+
+                                    // empty the futures currently turning text to sound
+                                    let mut futures_ordered =
+                                        thread_futures_ordered_mutex.lock().unwrap();
+                                    *futures_ordered = FuturesOrdered::new();
+                                    drop(futures_ordered);
+
+                                    // clear the channel that passes audio files to the ai voice audio playing thread
+                                    for _ in thread_ai_audio_playing_rx.try_iter() {}
+
+                                    // stop the AI voice from speaking the current sentence
+                                    thread_ai_voice_sink.stop();
+                                }
 
                                 let random_filename = format!("{}.wav", Uuid::new_v4());
                                 let voice_tmp_path = tmp_dir.path().join(random_filename);
@@ -596,6 +718,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && key_pressed {
                                 key_pressed = false;
                                 // handle key release
+
+                                // allow the llm to start
+                                let mut llm_should_stop =
+                                    thread_llm_should_stop_mutex.lock().unwrap();
+                                *llm_should_stop = false;
+                                drop(llm_should_stop);
 
                                 // get elapsed time since recording started
                                 let elapsed = match recording_start.elapsed() {
@@ -637,16 +765,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            let ai_voice_sink = sink.clone();
+            let thread_ai_voice_sink = ai_voice_sink.clone();
 
             // Create AI thread
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
+            let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
+            let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             thread::spawn(move || {
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
-                let mut sentence_accumulator = SentenceAccumulator::new();
+                // let mut sentence_accumulator = SentenceAccumulator::new(ai_tts_tx);
 
                 message_history.push(
                     ChatCompletionRequestSystemMessageArgs::default()
@@ -661,7 +791,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for audio_path in recording_rx.iter() {
-                    ai_voice_sink.stop();
+                    thread_ai_voice_sink.stop();
 
                     let transcription_result = match runtime.block_on(future::timeout(
                         Duration::from_secs(10),
@@ -714,132 +844,127 @@ fn main() -> Result<(), Box<dyn Error>> {
                     );
 
                     // repeatedly create request until it's answered
-                    // let mut ai_content;
-                    let ai_content = loop {
-                        // ai_content = String::new();
+                    let mut displayed_ai_label = false;
+                    'request: loop {
+                        let mut ai_content = String::new();
                         let request = CreateChatCompletionRequestArgs::default()
                             // .model("gpt-3.5-turbo")
-                            // .model("gpt-4-0613")
                             .model("gpt-4-1106-preview")
                             .max_tokens(512u16)
                             .messages(message_history.clone())
                             .build()
                             .unwrap();
 
-                        let response_message = match runtime.block_on(future::timeout(
-                            Duration::from_secs(20),
-                            client.chat().create(request),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to get ai_content due to timeout: {}",
-                                    err
-                                ));
+                        let mut stream = runtime
+                            .block_on(client.chat().create_stream(request))
+                            .unwrap();
 
-                                play_audio(&failed_temp_file.path());
+                        // let test = ;
 
-                                continue;
+                        while let Some(result) = {
+                            match runtime
+                                .block_on(future::timeout(Duration::from_secs(15), stream.next()))
+                            {
+                                Ok(result) => result,
+                                Err(err) => {
+                                    println_error(&format!(
+                                        "Failed to get response from AI due to timeout: {:?}",
+                                        err
+                                    ));
+
+                                    play_audio(&failed_temp_file.path());
+
+                                    break 'request;
+                                }
                             }
-                        }
-                        .unwrap()
-                        .choices
-                        .first()
-                        .unwrap()
-                        .message
-                        .clone();
+                        } {
+                            // println!("result: {:#?}",result);
 
-                        match response_message.content {
-                            Some(ai_content) => {
-                                println!("{}", "AI: ".truecolor(0, 0, 255));
-                                println!("{}", ai_content);
+                            let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
+
+                            if *llm_should_stop {
+                                *llm_should_stop = false;
+
+                                // remember what the AI said so far.
                                 message_history.push(
                                     ChatCompletionRequestAssistantMessageArgs::default()
                                         .content(&ai_content)
+                                        // .role(Role::Assistant)
                                         .build()
                                         .unwrap()
                                         .into(),
                                 );
-                                break ai_content;
+
+                                println!();
+
+                                break 'request;
                             }
-                            None => println!("No content"),
-                        }
-                    };
+                            drop(llm_should_stop);
 
-                    // sentence_accumulator.add_token(&ai_content);
-                    for char in ai_content.chars() {
-                        sentence_accumulator.add_token(&char.to_string());
-                    }
-                    sentence_accumulator.complete_sentence();
+                            match result {
+                                Ok(response) => {
+                                    response.choices.iter().for_each(|chat_choice| {
+                                        if let Some(ref content) = chat_choice.delta.content {
+                                            if !displayed_ai_label {
+                                                // writeln!(lock, "{}", "AI: ".truecolor(255, 0, 0))
+                                                //     .unwrap();
+                                                println!("{}", "AI: ".truecolor(255, 0, 0));
+                                                displayed_ai_label = true;
+                                            }
+                                            // write!(lock, "{}", content).unwrap();
+                                            print!("{}", content);
+                                            ai_content += content;
+                                            // sentence_accumulator.add_token(&content);
 
-                    // Turn AI's response into speech
-                    {
-                        let request = CreateSpeechRequestArgs::default()
-                            .input(ai_content)
-                            .voice(Into::<Voice>::into(
-                                opt.ai_voice.clone().unwrap_or(VoiceEnum::Echo),
-                            ))
-                            .model(SpeechModel::Tts1)
-                            .build()
-                            .unwrap();
-
-                        let response = match runtime.block_on(future::timeout(
-                            Duration::from_secs(15),
-                            client.audio().speech(request),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to turn text to speech due to timeout: {:?}",
-                                    err
-                                ));
-
-                                play_audio(&failed_temp_file.path());
-
-                                continue;
+                                            let mut thread_sentence_accumulator =
+                                                thread_sentence_accumulator_mutex.lock().unwrap();
+                                            thread_sentence_accumulator.add_token(&content);
+                                            drop(thread_sentence_accumulator);
+                                        }
+                                    });
+                                }
+                                Err(_err) => {
+                                    // writeln!(lock, "error: {_err}").unwrap();
+                                    println!("error: {_err}");
+                                    if !message_history.is_empty() {
+                                        message_history.remove(0);
+                                        // writeln!(
+                                        //     lock,
+                                        //     "{}Removed message. There are now {} remembered messages",
+                                        //     "System: ".truecolor(255, 165, 0),
+                                        //     message_history.len()
+                                        // )
+                                        // .unwrap();
+                                        println!(
+                                            "Removed message. There are now {} remembered messages",
+                                            message_history.len()
+                                        );
+                                    }
+                                    continue 'request;
+                                }
                             }
+                            stdout().flush().unwrap();
                         }
-                        .unwrap();
+                        println!();
 
-                        match runtime.block_on(future::timeout(
-                            Duration::from_secs(10),
-                            response.save(audio_to_speed_up.path()),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to save ai speech to file due to timeout: {:?}",
-                                    err
-                                ));
-
-                                play_audio(&failed_temp_file.path());
-
-                                continue;
-                            }
-                        }
-                        .unwrap();
+                        message_history.push(
+                            ChatCompletionRequestAssistantMessageArgs::default()
+                                .content(&ai_content)
+                                // .role(Role::Assistant)
+                                .build()
+                                .unwrap()
+                                .into(),
+                        );
+                        break;
                     }
 
-                    // play sound of AI speech
-                    {
-                        let file_to_play = if opt.speech_speed != 1.0 {
-                            adjust_audio_file_speed(
-                                audio_to_speed_up.path(),
-                                sped_up_audio_path.path(),
-                                opt.speech_speed,
-                            );
-                            sped_up_audio_path.path()
-                        } else {
-                            audio_to_speed_up.path()
-                        };
+                    // Tells the ai voice to speak the remaining text in the buffer
+                    // sentence_accumulator.complete_sentence();
 
-                        let file = std::fs::File::open(file_to_play).unwrap();
-                        ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-
-                        println!("{}", "Speaking...".truecolor(128, 128, 128));
-
-                        ai_voice_sink.play();
-                    }
+                    let mut thread_sentence_accumulator =
+                        thread_sentence_accumulator_mutex.lock().unwrap();
+                    thread_sentence_accumulator.complete_sentence();
+                    drop(thread_sentence_accumulator);
                 }
             });
 
@@ -847,7 +972,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             // Playing audio has it's own dedicated thread because I wanted to be able to play audio
             // by passing an audio file path to a function. But the audio playing function needs to
             // have the sink and stream variable not be dropped after the end of the function.
-            thread::spawn(move || {
+            tokio::spawn(async move {
                 let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
@@ -855,14 +980,64 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let file = std::fs::File::open(audio_path).unwrap();
                     sink.stop();
                     sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    sink.play();
+                    // sink.play();
+                }
+            });
+
+            // Create text to speech conversion thread
+            // that will convert text to speech and pass the audio file path to
+            // the ai voice audio playing thread
+            let thread_futures_ordered_mutex = futures_ordered_mutex.clone();
+            thread::spawn(move || {
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime")
+                    .unwrap();
+
+                loop {
+                    let mut futures_ordered = thread_futures_ordered_mutex.lock().unwrap();
+
+                    // Queue up any text segments to be turned into speech.
+                    for ai_text in ai_tts_rx.try_iter() {
+                        futures_ordered.push_back(turn_text_to_speech(ai_text, opt.speech_speed));
+                    }
+
+                    // Send any ready audio segments to the ai voice audio playing thread
+                    while let Some(tempfile_option) = runtime.block_on(futures_ordered.next()) {
+                        match tempfile_option {
+                            Some(tempfile) => {
+                                // send tempfile to ai voice audio playing thread
+                                ai_audio_playing_tx.send(tempfile).unwrap();
+                            }
+                            None => {
+                                // play_audio(&failed_temp_file.path());
+                                println_error("failed to turn text to speech");
+                            }
+                        }
+                    }
+                    drop(futures_ordered);
+                }
+            });
+
+            // Create the ai voice audio playing thread
+            let thread_ai_voice_sink = ai_voice_sink.clone();
+            let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
+            tokio::spawn(async move {
+                // println!("Waiting for ai_voice_playing_rx");
+                for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
+                    // play the sound of AI speech
+                    let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
+                    thread_ai_voice_sink.stop();
+                    thread_ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    // sink.play();
+
+                    thread_ai_voice_sink.sleep_until_end();
                 }
             });
 
             // Have this main thread recieve events and send them to the key handler thread
             {
                 let callback = move |event: Event| {
-                    tx.send(event).unwrap();
+                    key_handler_tx.send(event).unwrap();
                 };
 
                 // This will block.
