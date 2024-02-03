@@ -396,15 +396,13 @@ fn get_second_to_last_char(s: &str) -> Option<char> {
 struct SentenceAccumulator {
     buffer: String,
     sentence_end_chars: Vec<char>,
-    ai_voice_channel_tx: flume::Sender<String>,
 }
 
 impl SentenceAccumulator {
-    fn new(channel: flume::Sender<String>) -> Self {
+    fn new() -> Self {
         SentenceAccumulator {
             buffer: String::new(),
             sentence_end_chars: vec!['.', '?', '!'],
-            ai_voice_channel_tx: channel,
         }
     }
 
@@ -437,9 +435,6 @@ impl SentenceAccumulator {
         let sentence = self.buffer.trim();
         if !sentence.is_empty() {
             println!("Complete sentence: {}", sentence);
-
-            // Turn the sentence into speech
-            self.ai_voice_channel_tx.send(sentence.to_string()).unwrap();
         }
     }
 
@@ -458,11 +453,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (audio_playing_tx, audio_playing_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
         flume::unbounded();
-
-    let (ai_voice_playing_tx, ai_voice_playing_rx): (
-        flume::Sender<String>,
-        flume::Receiver<String>,
-    ) = flume::unbounded();
 
     let play_audio = move |path: &Path| {
         audio_playing_tx.send(path.to_path_buf()).unwrap();
@@ -649,9 +639,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let ai_voice_sink = sink.clone();
 
-            // let mut sentence_accumulator =
-            //     SentenceAccumulator::new(Box::new(ai_voice_speak) as fn(&Path));
-
             // Create AI thread
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
@@ -659,7 +646,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
-                let mut sentence_accumulator = SentenceAccumulator::new(ai_voice_playing_tx);
+                let mut sentence_accumulator = SentenceAccumulator::new();
 
                 message_history.push(
                     ChatCompletionRequestSystemMessageArgs::default()
@@ -779,10 +766,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    sentence_accumulator.add_token(&ai_content);
-                    // for char in ai_content.chars() {
-                    //     sentence_accumulator.add_token(&char.to_string());
-                    // }
+                    // sentence_accumulator.add_token(&ai_content);
+                    for char in ai_content.chars() {
+                        sentence_accumulator.add_token(&char.to_string());
+                    }
                     sentence_accumulator.complete_sentence();
 
                     // Turn AI's response into speech
@@ -869,83 +856,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                     sink.stop();
                     sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     sink.play();
-                }
-            });
-
-            // Create the ai voice audio playing thread
-            thread::spawn(move || {
-                let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-
-                let runtime = tokio::runtime::Runtime::new()
-                    .context("Failed to create tokio runtime")
-                    .unwrap();
-                let client = Client::new();
-
-                // receive text to turn into speech and play it
-
-                for ai_text in ai_voice_playing_rx.iter() {
-                    // Turn AI's response into speech
-                    let ai_speech_segment_tempfile = {
-                        let request = CreateSpeechRequestArgs::default()
-                            .input(ai_text)
-                            .voice(Voice::Echo)
-                            .model(SpeechModel::Tts1)
-                            .build()
-                            .unwrap();
-
-                        let response = match runtime.block_on(future::timeout(
-                            Duration::from_secs(15),
-                            client.audio().speech(request),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to turn text to speech due to timeout: {:?}",
-                                    err
-                                ));
-
-                                // play_audio(&failed_temp_file.path());
-
-                                continue;
-                            }
-                        }
-                        .unwrap();
-
-                        let ai_speech_segment_tempfile = Builder::new()
-                            .prefix("ai-speech-segment")
-                            .suffix(".mp3")
-                            .rand_bytes(16)
-                            .tempfile()
-                            .unwrap();
-
-                        match runtime.block_on(future::timeout(
-                            Duration::from_secs(10),
-                            response.save(ai_speech_segment_tempfile.path()),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to save ai speech to file due to timeout: {:?}",
-                                    err
-                                ));
-
-                                // play_audio(&failed_temp_file.path());
-
-                                continue;
-                            }
-                        }
-                        .unwrap();
-
-                        ai_speech_segment_tempfile
-                    };
-
-                    // play the sound of AI speech
-                    let file = std::fs::File::open(ai_speech_segment_tempfile.path()).unwrap();
-                    sink.stop();
-                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    sink.play();
-                    sink.sleep_until_end();
                 }
             });
 
