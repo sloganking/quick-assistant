@@ -628,7 +628,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
             let ai_voice_sink = Arc::new(ai_voice_sink);
 
+            let (ai_audio_playing_tx, ai_audio_playing_rx): (
+                flume::Sender<NamedTempFile>,
+                flume::Receiver<NamedTempFile>,
+            ) = flume::unbounded();
+
             let thread_ai_voice_sink = ai_voice_sink.clone();
+
+            let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
 
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
@@ -647,7 +654,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 key_pressed = true;
                                 // handle key press
 
-                                thread_ai_voice_sink.stop();
+                                // stop the AI voice from speaking
+                                {
+                                    // empty channel of all text messages queued up to be turned into audio speech
+                                    for _ in thread_ai_audio_playing_rx.try_iter() {}
+
+                                    // empty the futures currently turning text to sound
+                                    // futures_ordered = FuturesOrdered::new();
+
+                                    // stop the AI voice from speaking the current sentence
+                                    thread_ai_voice_sink.stop();
+                                }
 
                                 let random_filename = format!("{}.wav", Uuid::new_v4());
                                 let voice_tmp_path = tmp_dir.path().join(random_filename);
@@ -878,11 +895,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            let (ai_audio_playing_tx, ai_audio_playing_rx): (
-                flume::Sender<NamedTempFile>,
-                flume::Receiver<NamedTempFile>,
-            ) = flume::unbounded();
-
             // Create text to speech conversion thread
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
@@ -912,19 +924,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             });
 
             // Create the ai voice audio playing thread
+            let thread_ai_voice_sink = ai_voice_sink.clone();
             tokio::spawn(async move {
-                let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-
                 // println!("Waiting for ai_voice_playing_rx");
                 for ai_speech_segment in ai_audio_playing_rx.iter() {
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
-                    sink.stop();
-                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    thread_ai_voice_sink.stop();
+                    thread_ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
 
-                    sink.sleep_until_end();
+                    thread_ai_voice_sink.sleep_until_end();
                 }
             });
 
