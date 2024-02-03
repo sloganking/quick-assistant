@@ -1,13 +1,22 @@
 pub mod speakstream {
     use anyhow::Context;
+    use async_openai::{
+        types::{
+            ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+            ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+            CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
+        },
+        Client,
+    };
+    use async_std::future;
     use colored::Colorize;
     use futures::stream::FuturesOrdered;
     use futures::Future;
     use rodio::OutputStream;
-    use std::io::BufReader;
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
-    use tempfile::NamedTempFile;
+    use std::{io::BufReader, time::Duration};
+    use tempfile::{Builder, NamedTempFile};
 
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);
@@ -76,6 +85,126 @@ pub mod speakstream {
         fn clear_buffer(&mut self) {
             self.buffer.clear();
         }
+    }
+
+    /// Speeds up an audio file by a factor of `speed`.
+    fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
+        // ffmpeg -y -i input.mp3 -filter:a "atempo={speed}" -vn output.mp3
+        match Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-i",
+                input
+                    .to_str()
+                    .context("Failed to convert input path to string")
+                    .unwrap(),
+                // -codec:a libmp3lame -b:a 160k
+                // audio quality decreases from 160k bitrate to 33k bitrate without these lines.
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                "160k",
+                //
+                "-filter:a",
+                format!("atempo={}", speed).as_str(),
+                "-vn",
+                output
+                    .to_str()
+                    .context("Failed to convert output path to string")
+                    .unwrap(),
+            ])
+            .output()
+        {
+            Ok(x) => {
+                if !x.status.success() {
+                    panic!("ffmpeg failed to adjust audio speed");
+                }
+                x
+            }
+            Err(err) => {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    panic!("ffmpeg not found. Please install ffmpeg and add it to your PATH");
+                } else {
+                    panic!("ffmpeg failed to adjust audio speed");
+                }
+            }
+        };
+    }
+
+    async fn turn_text_to_speech(ai_text: String, speed: f32) -> Option<NamedTempFile> {
+        let client = Client::new();
+
+        // Turn AI's response into speech
+
+        let request = CreateSpeechRequestArgs::default()
+            .input(ai_text)
+            .voice(Voice::Echo)
+            .model(SpeechModel::Tts1)
+            .build()
+            .unwrap();
+
+        let response =
+            match future::timeout(Duration::from_secs(15), client.audio().speech(request)).await {
+                Ok(transcription_result) => transcription_result,
+                Err(err) => {
+                    println_error(&format!(
+                        "Failed to turn text to speech due to timeout: {:?}",
+                        err
+                    ));
+
+                    // play_audio(&failed_temp_file.path());
+
+                    // continue;
+                    return None;
+                }
+            }
+            .unwrap();
+
+        let ai_speech_segment_tempfile = Builder::new()
+            .prefix("ai-speech-segment")
+            .suffix(".mp3")
+            .rand_bytes(16)
+            .tempfile()
+            .unwrap();
+
+        let _ = match future::timeout(
+            Duration::from_secs(10),
+            response.save(ai_speech_segment_tempfile.path()),
+        )
+        .await
+        {
+            Ok(transcription_result) => transcription_result,
+            Err(err) => {
+                println_error(&format!(
+                    "Failed to save ai speech to file due to timeout: {:?}",
+                    err
+                ));
+
+                // play_audio(&failed_temp_file.path());
+
+                // continue;
+                return None;
+            }
+        };
+
+        if speed != 1.0 {
+            let sped_up_audio_path = Builder::new()
+                .prefix("quick-assist-ai-voice-sped-up")
+                .suffix(".mp3")
+                .rand_bytes(16)
+                .tempfile()
+                .unwrap();
+
+            adjust_audio_file_speed(
+                ai_speech_segment_tempfile.path(),
+                sped_up_audio_path.path(),
+                speed as f32,
+            );
+
+            return Some(sped_up_audio_path);
+        }
+
+        Some(ai_speech_segment_tempfile)
     }
 
     /// SpeakStream is a struct that accumulates tokens into sentences
