@@ -398,15 +398,13 @@ fn get_second_to_last_char(s: &str) -> Option<char> {
 struct SentenceAccumulator {
     buffer: String,
     sentence_end_chars: Vec<char>,
-    ai_voice_channel_tx: flume::Sender<String>,
 }
 
 impl SentenceAccumulator {
-    fn new(channel: flume::Sender<String>) -> Self {
+    fn new() -> Self {
         SentenceAccumulator {
             buffer: String::new(),
             sentence_end_chars: vec!['.', '?', '!'],
-            ai_voice_channel_tx: channel,
         }
     }
 
@@ -984,6 +982,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
+
             // Create text to speech conversion thread
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
@@ -1033,6 +1032,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     thread_ai_voice_sink.sleep_until_end();
                 }
             });
+
 
             // Have this main thread recieve events and send them to the key handler thread
             {
