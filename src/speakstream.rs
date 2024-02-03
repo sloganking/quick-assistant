@@ -1,9 +1,17 @@
 pub mod speakstream {
+    use anyhow::Context;
+    use colored::Colorize;
     use futures::stream::FuturesOrdered;
     use futures::Future;
+    use rodio::OutputStream;
+    use std::io::BufReader;
     use std::pin::Pin;
     use std::sync::{Arc, Mutex};
     use tempfile::NamedTempFile;
+
+    fn println_error(err: &str) {
+        println!("{}: {}", "Error".truecolor(255, 0, 0), err);
+    }
 
     /// SentenceAccumulator is a struct that accumulates tokens into sentences
     /// before sending the sentences to the AI voice channel.
@@ -70,11 +78,15 @@ pub mod speakstream {
         }
     }
 
-    /// SpeakStream
+    /// SpeakStream is a struct that accumulates tokens into sentences
+    /// Once a sentence is complete, it speaks the sentence using the AI voice.
     pub struct SpeakStream {
         sentence_accumulator: SentenceAccumulator,
         futures_ordered_mutex:
             Arc<Mutex<FuturesOrdered<Pin<Box<dyn Future<Output = Option<NamedTempFile>>>>>>>,
+        ai_voice_sink: Arc<rodio::Sink>,
+        stream: OutputStream,
+        speech_speed: f32,
     }
 
     impl SpeakStream {
@@ -83,7 +95,19 @@ pub mod speakstream {
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
                 flume::unbounded();
 
+            // Create a mutex to hold the futures ordered queue
+            // Used to turn text into speech
             let futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
+
+            // Create the AI voice audio sink
+            let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+            let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
+            let ai_voice_sink = Arc::new(ai_voice_sink);
+
+            let (ai_audio_playing_tx, ai_audio_playing_rx): (
+                flume::Sender<NamedTempFile>,
+                flume::Receiver<NamedTempFile>,
+            ) = flume::unbounded();
 
             // Create text to speech conversion thread
             // that will convert text to speech and pass the audio file path to
@@ -99,7 +123,7 @@ pub mod speakstream {
 
                     // Queue up any text segments to be turned into speech.
                     for ai_text in ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(ai_text, opt.speech_speed));
+                        futures_ordered.push_back(turn_text_to_speech(ai_text, 1.0));
                     }
 
                     // Send any ready audio segments to the ai voice audio playing thread
@@ -138,6 +162,9 @@ pub mod speakstream {
             SpeakStream {
                 sentence_accumulator: SentenceAccumulator::new(ai_tts_tx),
                 futures_ordered_mutex,
+                ai_voice_sink,
+                stream: _stream,
+                speech_speed: 1.0,
             }
         }
 
