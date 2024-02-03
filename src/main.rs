@@ -908,7 +908,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             if !displayed_ai_label {
                                                 // writeln!(lock, "{}", "AI: ".truecolor(255, 0, 0))
                                                 //     .unwrap();
-                                                println!("{}", "AI: ".truecolor(255, 0, 0));
+                                                println!("{}", "AI: ".truecolor(0, 0, 255));
                                                 displayed_ai_label = true;
                                             }
                                             // write!(lock, "{}", content).unwrap();
