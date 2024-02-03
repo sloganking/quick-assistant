@@ -650,9 +650,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let thread_ai_voice_sink = ai_voice_sink.clone();
 
-            // let mut sentence_accumulator =
-            //     SentenceAccumulator::new(Box::new(ai_voice_speak) as fn(&Path));
-
             // Create AI thread
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
@@ -727,59 +724,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .into(),
                     );
 
-                    // repeatedly create request until it's answered
-
-                    // let ai_content = loop {
-                    //     // ai_content = String::new();
-                    //     let request = CreateChatCompletionRequestArgs::default()
-                    //         // .model("gpt-3.5-turbo")
-                    //         // .model("gpt-4-0613")
-                    //         .model("gpt-4-1106-preview")
-                    //         .max_tokens(512u16)
-                    //         .messages(message_history.clone())
-                    //         .build()
-                    //         .unwrap();
-
-                    //     let response_message = match runtime.block_on(future::timeout(
-                    //         Duration::from_secs(20),
-                    //         client.chat().create(request),
-                    //     )) {
-                    //         Ok(transcription_result) => transcription_result,
-                    //         Err(err) => {
-                    //             println_error(&format!(
-                    //                 "Failed to get ai_content due to timeout: {}",
-                    //                 err
-                    //             ));
-
-                    //             play_audio(&failed_temp_file.path());
-
-                    //             continue;
-                    //         }
-                    //     }
-                    //     .unwrap()
-                    //     .choices
-                    //     .first()
-                    //     .unwrap()
-                    //     .message
-                    //     .clone();
-
-                    //     match response_message.content {
-                    //         Some(ai_content) => {
-                    //             println!("{}", "AI: ".truecolor(0, 0, 255));
-                    //             println!("{}", ai_content);
-                    //             message_history.push(
-                    //                 ChatCompletionRequestAssistantMessageArgs::default()
-                    //                     .content(&ai_content)
-                    //                     .build()
-                    //                     .unwrap()
-                    //                     .into(),
-                    //             );
-                    //             break ai_content;
-                    //         }
-                    //         None => println!("No content"),
-                    //     }
-                    // };
-
                     let mut ai_content = String::new();
 
                     // repeatedly create request until it's answered
@@ -798,19 +742,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .block_on(client.chat().create_stream(request))
                             .unwrap();
 
-                        // For reasons not documented in OpenAI docs / OpenAPI spec,
-                        // the response of streaming call is different and doesn't include all the same fields.
-
-                        // From Rust docs on print: https://doc.rust-lang.org/std/macro.print.html
-                        //
-                        //  Note that stdout is frequently line-buffered by default so it may be necessary
-                        //  to use io::stdout().flush() to ensure the output is emitted immediately.
-                        //
-                        //  The print! macro will lock the standard output on each call.
-                        //  If you call print! within a hot loop, this behavior may be the bottleneck of the loop.
-                        //  To avoid this, lock stdout with io::stdout().lock():
-
-                        // let mut lock = stdout().lock();
                         while let Some(result) = runtime.block_on(stream.next()) {
                             // println!("result: {:#?}",result);
 
@@ -866,80 +797,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         break;
                     }
 
-                    // sentence_accumulator.add_token(&ai_content);
-                    // for char in ai_content.chars() {
-                    //     sentence_accumulator.add_token(&char.to_string());
-                    // }
+                    // Tells the ai voice to speak the remaining text in the buffer
                     sentence_accumulator.complete_sentence();
-
-                    // // Turn AI's response into speech
-                    // {
-                    //     let request = CreateSpeechRequestArgs::default()
-                    //         .input(ai_content)
-                    //         .voice(Into::<Voice>::into(
-                    //             opt.ai_voice.clone().unwrap_or(VoiceEnum::Echo),
-                    //         ))
-                    //         .model(SpeechModel::Tts1)
-                    //         .build()
-                    //         .unwrap();
-
-                    //     let response = match runtime.block_on(future::timeout(
-                    //         Duration::from_secs(15),
-                    //         client.audio().speech(request),
-                    //     )) {
-                    //         Ok(transcription_result) => transcription_result,
-                    //         Err(err) => {
-                    //             println_error(&format!(
-                    //                 "Failed to turn text to speech due to timeout: {:?}",
-                    //                 err
-                    //             ));
-
-                    //             play_audio(&failed_temp_file.path());
-
-                    //             continue;
-                    //         }
-                    //     }
-                    //     .unwrap();
-
-                    //     match runtime.block_on(future::timeout(
-                    //         Duration::from_secs(10),
-                    //         response.save(audio_to_speed_up.path()),
-                    //     )) {
-                    //         Ok(transcription_result) => transcription_result,
-                    //         Err(err) => {
-                    //             println_error(&format!(
-                    //                 "Failed to save ai speech to file due to timeout: {:?}",
-                    //                 err
-                    //             ));
-
-                    //             play_audio(&failed_temp_file.path());
-
-                    //             continue;
-                    //         }
-                    //     }
-                    //     .unwrap();
-                    // }
-
-                    // // play sound of AI speech
-                    // {
-                    //     let file_to_play = if opt.speech_speed != 1.0 {
-                    //         adjust_audio_file_speed(
-                    //             audio_to_speed_up.path(),
-                    //             sped_up_audio_path.path(),
-                    //             opt.speech_speed,
-                    //         );
-                    //         sped_up_audio_path.path()
-                    //     } else {
-                    //         audio_to_speed_up.path()
-                    //     };
-
-                    //     // let file = std::fs::File::open(file_to_play).unwrap();
-                    //     // ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-
-                    //     // println!("{}", "Speaking...".truecolor(128, 128, 128));
-
-                    //     // ai_voice_sink.play();
-                    // }
                 }
             });
 
@@ -959,24 +818,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            // Create text to speech conversion thread
-            // that will convert text to speech and pass the audio file path to
-            // the ai voice audio playing thread
-
-            // thread::spawn(move || {});
-
             let (ai_audio_playing_tx, ai_audio_playing_rx): (
                 flume::Sender<NamedTempFile>,
                 flume::Receiver<NamedTempFile>,
             ) = flume::unbounded();
 
+            // Create text to speech conversion thread
+            // that will convert text to speech and pass the audio file path to
+            // the ai voice audio playing thread
             tokio::spawn(async move {
-                // receive text to turn into speech and play it
-
                 async fn turn_text_to_speech(ai_text: String) -> Option<NamedTempFile> {
-                    // let runtime = tokio::runtime::Runtime::new()
-                    //     .context("Failed to create tokio runtime")
-                    //     .unwrap();
                     let client = Client::new();
 
                     // Turn AI's response into speech
