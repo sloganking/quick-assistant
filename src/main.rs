@@ -565,10 +565,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Setup vars for playing sound through speakers
             let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-            let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-            let sink = Arc::new(sink);
+            let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
+            let ai_voice_sink = Arc::new(ai_voice_sink);
 
-            let ai_voice_sink = sink.clone();
+            let thread_ai_voice_sink = ai_voice_sink.clone();
 
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
@@ -587,7 +587,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 key_pressed = true;
                                 // handle key press
 
-                                ai_voice_sink.stop();
+                                thread_ai_voice_sink.stop();
 
                                 let random_filename = format!("{}.wav", Uuid::new_v4());
                                 let voice_tmp_path = tmp_dir.path().join(random_filename);
@@ -648,7 +648,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            let ai_voice_sink = sink.clone();
+            let thread_ai_voice_sink = ai_voice_sink.clone();
 
             // let mut sentence_accumulator =
             //     SentenceAccumulator::new(Box::new(ai_voice_speak) as fn(&Path));
@@ -675,7 +675,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for audio_path in recording_rx.iter() {
-                    ai_voice_sink.stop();
+                    thread_ai_voice_sink.stop();
 
                     let transcription_result = match runtime.block_on(future::timeout(
                         Duration::from_secs(10),
