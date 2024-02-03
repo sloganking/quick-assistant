@@ -617,7 +617,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 return Ok(());
             }
 
-            let (tx, rx): (flume::Sender<Event>, flume::Receiver<Event>) = flume::unbounded();
+            let (key_handler_tx, key_handler_rx): (flume::Sender<Event>, flume::Receiver<Event>) =
+                flume::unbounded();
 
             let (recording_tx, recording_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
                 flume::unbounded();
@@ -639,7 +640,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let key_to_check = ptt_key;
                 let tmp_dir = tempdir().unwrap();
                 let mut voice_tmp_path_option: Option<PathBuf> = None;
-                for event in rx.iter() {
+                for event in key_handler_rx.iter() {
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
                             if key == key_to_check && !key_pressed {
@@ -930,7 +931,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Have this main thread recieve events and send them to the key handler thread
             {
                 let callback = move |event: Event| {
-                    tx.send(event).unwrap();
+                    key_handler_tx.send(event).unwrap();
                 };
 
                 // This will block.
