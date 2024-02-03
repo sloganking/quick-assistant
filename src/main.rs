@@ -2,7 +2,7 @@ use anyhow::Context;
 use dotenvy::dotenv;
 use std::env;
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -438,10 +438,12 @@ impl SentenceAccumulator {
         // Trim the sentence before processing to remove any leading or trailing whitespace.
         let sentence = self.buffer.trim();
         if !sentence.is_empty() {
-            println!("{}{}", "Complete sentence: ".yellow(), sentence);
+            println!("\n{}{}", "Complete sentence: ".yellow(), sentence);
 
             // Turn the sentence into speech
+            println!("sending message");
             self.ai_voice_channel_tx.send(sentence.to_string()).unwrap();
+            println!("Message sent")
         }
     }
 
@@ -729,132 +731,218 @@ fn main() -> Result<(), Box<dyn Error>> {
                     );
 
                     // repeatedly create request until it's answered
-                    // let mut ai_content;
-                    let ai_content = loop {
-                        // ai_content = String::new();
+
+                    // let ai_content = loop {
+                    //     // ai_content = String::new();
+                    //     let request = CreateChatCompletionRequestArgs::default()
+                    //         // .model("gpt-3.5-turbo")
+                    //         // .model("gpt-4-0613")
+                    //         .model("gpt-4-1106-preview")
+                    //         .max_tokens(512u16)
+                    //         .messages(message_history.clone())
+                    //         .build()
+                    //         .unwrap();
+
+                    //     let response_message = match runtime.block_on(future::timeout(
+                    //         Duration::from_secs(20),
+                    //         client.chat().create(request),
+                    //     )) {
+                    //         Ok(transcription_result) => transcription_result,
+                    //         Err(err) => {
+                    //             println_error(&format!(
+                    //                 "Failed to get ai_content due to timeout: {}",
+                    //                 err
+                    //             ));
+
+                    //             play_audio(&failed_temp_file.path());
+
+                    //             continue;
+                    //         }
+                    //     }
+                    //     .unwrap()
+                    //     .choices
+                    //     .first()
+                    //     .unwrap()
+                    //     .message
+                    //     .clone();
+
+                    //     match response_message.content {
+                    //         Some(ai_content) => {
+                    //             println!("{}", "AI: ".truecolor(0, 0, 255));
+                    //             println!("{}", ai_content);
+                    //             message_history.push(
+                    //                 ChatCompletionRequestAssistantMessageArgs::default()
+                    //                     .content(&ai_content)
+                    //                     .build()
+                    //                     .unwrap()
+                    //                     .into(),
+                    //             );
+                    //             break ai_content;
+                    //         }
+                    //         None => println!("No content"),
+                    //     }
+                    // };
+
+                    let mut ai_content = String::new();
+
+                    // repeatedly create request until it's answered
+                    let mut displayed_ai_label = false;
+                    'request: loop {
+                        ai_content = String::new();
                         let request = CreateChatCompletionRequestArgs::default()
                             // .model("gpt-3.5-turbo")
-                            // .model("gpt-4-0613")
                             .model("gpt-4-1106-preview")
                             .max_tokens(512u16)
                             .messages(message_history.clone())
                             .build()
                             .unwrap();
 
-                        let response_message = match runtime.block_on(future::timeout(
-                            Duration::from_secs(20),
-                            client.chat().create(request),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to get ai_content due to timeout: {}",
-                                    err
-                                ));
+                        let mut stream = runtime
+                            .block_on(client.chat().create_stream(request))
+                            .unwrap();
 
-                                play_audio(&failed_temp_file.path());
+                        // For reasons not documented in OpenAI docs / OpenAPI spec,
+                        // the response of streaming call is different and doesn't include all the same fields.
 
-                                continue;
+                        // From Rust docs on print: https://doc.rust-lang.org/std/macro.print.html
+                        //
+                        //  Note that stdout is frequently line-buffered by default so it may be necessary
+                        //  to use io::stdout().flush() to ensure the output is emitted immediately.
+                        //
+                        //  The print! macro will lock the standard output on each call.
+                        //  If you call print! within a hot loop, this behavior may be the bottleneck of the loop.
+                        //  To avoid this, lock stdout with io::stdout().lock():
+
+                        // let mut lock = stdout().lock();
+                        while let Some(result) = runtime.block_on(stream.next()) {
+                            // println!("result: {:#?}",result);
+
+                            match result {
+                                Ok(response) => {
+                                    response.choices.iter().for_each(|chat_choice| {
+                                        if let Some(ref content) = chat_choice.delta.content {
+                                            if !displayed_ai_label {
+                                                // writeln!(lock, "{}", "AI: ".truecolor(255, 0, 0))
+                                                //     .unwrap();
+                                                println!("{}", "AI: ".truecolor(255, 0, 0));
+                                                displayed_ai_label = true;
+                                            }
+                                            // write!(lock, "{}", content).unwrap();
+                                            print!("{}", content);
+                                            ai_content += content;
+                                            sentence_accumulator.add_token(&content);
+                                        }
+                                    });
+                                }
+                                Err(_err) => {
+                                    // writeln!(lock, "error: {_err}").unwrap();
+                                    println!("error: {_err}");
+                                    if !message_history.is_empty() {
+                                        message_history.remove(0);
+                                        // writeln!(
+                                        //     lock,
+                                        //     "{}Removed message. There are now {} remembered messages",
+                                        //     "System: ".truecolor(255, 165, 0),
+                                        //     message_history.len()
+                                        // )
+                                        // .unwrap();
+                                        println!(
+                                            "Removed message. There are now {} remembered messages",
+                                            message_history.len()
+                                        );
+                                    }
+                                    continue 'request;
+                                }
                             }
+                            stdout().flush().unwrap();
                         }
-                        .unwrap()
-                        .choices
-                        .first()
-                        .unwrap()
-                        .message
-                        .clone();
+                        println!();
 
-                        match response_message.content {
-                            Some(ai_content) => {
-                                println!("{}", "AI: ".truecolor(0, 0, 255));
-                                println!("{}", ai_content);
-                                message_history.push(
-                                    ChatCompletionRequestAssistantMessageArgs::default()
-                                        .content(&ai_content)
-                                        .build()
-                                        .unwrap()
-                                        .into(),
-                                );
-                                break ai_content;
-                            }
-                            None => println!("No content"),
-                        }
-                    };
+                        message_history.push(
+                            ChatCompletionRequestAssistantMessageArgs::default()
+                                .content(&ai_content)
+                                // .role(Role::Assistant)
+                                .build()
+                                .unwrap()
+                                .into(),
+                        );
+                        break;
+                    }
 
-                    sentence_accumulator.add_token(&ai_content);
+                    // sentence_accumulator.add_token(&ai_content);
                     // for char in ai_content.chars() {
                     //     sentence_accumulator.add_token(&char.to_string());
                     // }
                     sentence_accumulator.complete_sentence();
 
-                    // Turn AI's response into speech
-                    {
-                        let request = CreateSpeechRequestArgs::default()
-                            .input(ai_content)
-                            .voice(Into::<Voice>::into(
-                                opt.ai_voice.clone().unwrap_or(VoiceEnum::Echo),
-                            ))
-                            .model(SpeechModel::Tts1)
-                            .build()
-                            .unwrap();
+                    // // Turn AI's response into speech
+                    // {
+                    //     let request = CreateSpeechRequestArgs::default()
+                    //         .input(ai_content)
+                    //         .voice(Into::<Voice>::into(
+                    //             opt.ai_voice.clone().unwrap_or(VoiceEnum::Echo),
+                    //         ))
+                    //         .model(SpeechModel::Tts1)
+                    //         .build()
+                    //         .unwrap();
 
-                        let response = match runtime.block_on(future::timeout(
-                            Duration::from_secs(15),
-                            client.audio().speech(request),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to turn text to speech due to timeout: {:?}",
-                                    err
-                                ));
+                    //     let response = match runtime.block_on(future::timeout(
+                    //         Duration::from_secs(15),
+                    //         client.audio().speech(request),
+                    //     )) {
+                    //         Ok(transcription_result) => transcription_result,
+                    //         Err(err) => {
+                    //             println_error(&format!(
+                    //                 "Failed to turn text to speech due to timeout: {:?}",
+                    //                 err
+                    //             ));
 
-                                play_audio(&failed_temp_file.path());
+                    //             play_audio(&failed_temp_file.path());
 
-                                continue;
-                            }
-                        }
-                        .unwrap();
+                    //             continue;
+                    //         }
+                    //     }
+                    //     .unwrap();
 
-                        match runtime.block_on(future::timeout(
-                            Duration::from_secs(10),
-                            response.save(audio_to_speed_up.path()),
-                        )) {
-                            Ok(transcription_result) => transcription_result,
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to save ai speech to file due to timeout: {:?}",
-                                    err
-                                ));
+                    //     match runtime.block_on(future::timeout(
+                    //         Duration::from_secs(10),
+                    //         response.save(audio_to_speed_up.path()),
+                    //     )) {
+                    //         Ok(transcription_result) => transcription_result,
+                    //         Err(err) => {
+                    //             println_error(&format!(
+                    //                 "Failed to save ai speech to file due to timeout: {:?}",
+                    //                 err
+                    //             ));
 
-                                play_audio(&failed_temp_file.path());
+                    //             play_audio(&failed_temp_file.path());
 
-                                continue;
-                            }
-                        }
-                        .unwrap();
-                    }
+                    //             continue;
+                    //         }
+                    //     }
+                    //     .unwrap();
+                    // }
 
-                    // play sound of AI speech
-                    {
-                        let file_to_play = if opt.speech_speed != 1.0 {
-                            adjust_audio_file_speed(
-                                audio_to_speed_up.path(),
-                                sped_up_audio_path.path(),
-                                opt.speech_speed,
-                            );
-                            sped_up_audio_path.path()
-                        } else {
-                            audio_to_speed_up.path()
-                        };
+                    // // play sound of AI speech
+                    // {
+                    //     let file_to_play = if opt.speech_speed != 1.0 {
+                    //         adjust_audio_file_speed(
+                    //             audio_to_speed_up.path(),
+                    //             sped_up_audio_path.path(),
+                    //             opt.speech_speed,
+                    //         );
+                    //         sped_up_audio_path.path()
+                    //     } else {
+                    //         audio_to_speed_up.path()
+                    //     };
 
-                        // let file = std::fs::File::open(file_to_play).unwrap();
-                        // ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    //     // let file = std::fs::File::open(file_to_play).unwrap();
+                    //     // ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
 
-                        // println!("{}", "Speaking...".truecolor(128, 128, 128));
+                    //     // println!("{}", "Speaking...".truecolor(128, 128, 128));
 
-                        // ai_voice_sink.play();
-                    }
+                    //     // ai_voice_sink.play();
+                    // }
                 }
             });
 
@@ -882,7 +970,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
-                let client = Client::new();
+                // let client = Client::new();
 
                 // receive text to turn into speech and play it
 
@@ -954,9 +1042,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 let mut futures_ordered = FuturesOrdered::new();
 
+                println!("Waitng for ai_voice_playing_rx");
                 for ai_text in ai_voice_playing_rx.iter() {
-                    println!("Speaking: {}", ai_text);
-
+                    println!(
+                        "{}",
+                        "Entered speech loop of ai_voice_playing_rx".truecolor(255, 0, 0)
+                    );
                     // let ai_text2 = ai_text.to_string();
 
                     futures_ordered.push_back(turn_text_to_speech(ai_text));
@@ -980,6 +1071,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                         match ai_speech_segment_tempfile_option {
                             Some(ai_speech_segment_tempfile) => {
+                                println!("speaking: ");
                                 // play the sound of AI speech
                                 let file =
                                     std::fs::File::open(ai_speech_segment_tempfile.path()).unwrap();
