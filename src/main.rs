@@ -641,6 +641,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let mut futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
 
+            let llm_should_stop_mutex = Arc::new(Mutex::new(false));
+
             let thread_ai_voice_sink = ai_voice_sink.clone();
 
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
@@ -651,6 +653,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
             let thread_ai_tts_rx = ai_tts_rx.clone();
             let thread_futures_ordered_mutex = futures_ordered_mutex.clone();
+            let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             tokio::spawn(async move {
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
@@ -668,7 +671,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 // stop the AI voice from speaking
                                 {
                                     // stop the LLM
-                                    // ???how???
+                                    let mut llm_should_stop =
+                                        thread_llm_should_stop_mutex.lock().unwrap();
+                                    *llm_should_stop = true;
+                                    drop(llm_should_stop);
 
                                     // clear the sentence accumulator
                                     let mut thread_sentence_accumulator =
@@ -710,6 +716,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && key_pressed {
                                 key_pressed = false;
                                 // handle key release
+
+                                // allow the llm to start
+                                let mut llm_should_stop =
+                                    thread_llm_should_stop_mutex.lock().unwrap();
+                                *llm_should_stop = false;
+                                drop(llm_should_stop);
 
                                 // get elapsed time since recording started
                                 let elapsed = match recording_start.elapsed() {
@@ -757,6 +769,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
             let thread_sentence_accumulator_mutex = sentence_accumulator.clone();
+            let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             thread::spawn(move || {
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
@@ -848,6 +861,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                         while let Some(result) = runtime.block_on(stream.next()) {
                             // println!("result: {:#?}",result);
+
+                            let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
+
+                            if *llm_should_stop {
+                                *llm_should_stop = false;
+
+                                // remember what the AI said so far.
+                                message_history.push(
+                                    ChatCompletionRequestAssistantMessageArgs::default()
+                                        .content(&ai_content)
+                                        // .role(Role::Assistant)
+                                        .build()
+                                        .unwrap()
+                                        .into(),
+                                );
+
+                                println!();
+
+                                break 'request;
+                            }
+                            drop(llm_should_stop);
 
                             match result {
                                 Ok(response) => {
