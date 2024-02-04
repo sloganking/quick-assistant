@@ -235,12 +235,11 @@ pub mod speakstream {
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
         ai_voice_sink: Arc<rodio::Sink>,
-        speech_speed: f32,
         ai_audio_playing_rx: flume::Receiver<NamedTempFile>,
     }
 
     impl SpeakStream {
-        pub fn new() -> (Self, OutputStream) {
+        pub fn new(speech_speed: f32) -> (Self, OutputStream) {
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
                 flume::unbounded();
@@ -275,7 +274,7 @@ pub mod speakstream {
                 loop {
                     // Queue up any text segments to be turned into speech.
                     for ai_text in thread_ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(ai_text, 1.0));
+                        futures_ordered.push_back(turn_text_to_speech(ai_text, speech_speed));
                     }
 
                     // Empty the futures ordered queue if the kill channel has received a message
@@ -342,7 +341,6 @@ pub mod speakstream {
                     ai_tts_rx,
                     futures_ordered_kill_tx,
                     ai_voice_sink,
-                    speech_speed: 1.0,
                     ai_audio_playing_rx,
                 },
                 _stream,
@@ -366,19 +364,13 @@ pub mod speakstream {
             self.sentence_accumulator.clear_buffer();
 
             // empty channel of all text messages queued up to be turned into audio speech
-            let mut count = 0;
-            for _ in self.ai_tts_rx.try_iter() {
-                count += 1;
-            }
+            for _ in self.ai_tts_rx.try_iter() {}
 
             // empty the futures currently turning text to sound
             self.futures_ordered_kill_tx.send(()).unwrap();
 
             // clear the channel that passes audio files to the ai voice audio playing thread
-            let mut count = 0;
-            for _ in self.ai_audio_playing_rx.try_iter() {
-                count += 1;
-            }
+            for _ in self.ai_audio_playing_rx.try_iter() {}
 
             // stop the AI voice from speaking the current sentence
             self.ai_voice_sink.stop();
