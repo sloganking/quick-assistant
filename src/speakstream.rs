@@ -348,12 +348,12 @@ pub mod speakstream {
             }
         }
 
-        fn add_token(&mut self, token: &str) {
+        pub fn add_token(&mut self, token: &str) {
             // Add the token to the sentence accumulator
             self.sentence_accumulator.add_token(token);
         }
 
-        fn stop_speech(&mut self) {
+        pub fn stop_speech(&mut self) {
             // clear all speech channels, stop async executors, and stop the audio sink
 
             //     // stop the LLM
