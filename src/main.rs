@@ -562,8 +562,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for audio_path in recording_rx.iter() {
-                    // thread_ai_voice_sink.stop();
-
                     let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
                     thread_speak_stream.stop_speech();
                     drop(thread_speak_stream);
