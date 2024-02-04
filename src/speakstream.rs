@@ -1,20 +1,16 @@
 pub mod speakstream {
 
     use anyhow::Context;
-    
-    
     use futures::stream::FuturesOrdered;
     use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
     use rodio::OutputStream;
-    
-    
-    use std::io::{BufReader};
-    use std::path::{Path};
+    use std::io::BufReader;
+    use std::path::Path;
     use std::process::Command;
-    use std::sync::{Arc};
+    use std::sync::Arc;
     use std::thread;
     use tempfile::Builder;
-    use tempfile::{NamedTempFile};
+    use tempfile::NamedTempFile;
     // use async_openai::{
     //     types::{
     //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -24,19 +20,12 @@ pub mod speakstream {
     //     Client,
     // };
     use async_openai::{
-        types::{
-            CreateSpeechRequestArgs, SpeechModel, Voice,
-        },
+        types::{CreateSpeechRequestArgs, SpeechModel, Voice},
         Client,
     };
     use async_std::future;
-    
     use colored::Colorize;
-    
-    
-    
     use std::time::Duration;
-    
 
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);

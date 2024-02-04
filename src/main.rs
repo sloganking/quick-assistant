@@ -4,12 +4,10 @@ use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
-
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
 use chrono::Local;
-
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
