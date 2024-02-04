@@ -1,25 +1,4 @@
 pub mod speakstream {
-    // use anyhow::Context;
-    // use async_openai::{
-    //     types::{
-    //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-    //         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    //         CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
-    //     },
-    //     Client,
-    // };
-    // use async_std::future;
-    // use clap::{Parser, Subcommand};
-    // use colored::Colorize;
-    // use futures::stream::FuturesOrdered;
-    // use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
-    // use futures::Future;
-    // use rodio::OutputStream;
-    // use std::pin::Pin;
-    // use std::sync::{Arc, Mutex};
-    // use std::thread;
-    // use std::{io::BufReader, time::Duration};
-    // use tempfile::{Builder, NamedTempFile};
 
     use anyhow::Context;
     use dotenvy::dotenv;
@@ -254,7 +233,6 @@ pub mod speakstream {
         sentence_accumulator: SentenceAccumulator,
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
-        // Arc<Mutex<FuturesOrdered<impl Future<Output = Option<NamedTempFile>>>>>,
         ai_voice_sink: Arc<rodio::Sink>,
         _stream: rodio::OutputStream,
         speech_speed: f32,
