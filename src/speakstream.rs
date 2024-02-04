@@ -252,11 +252,13 @@ pub mod speakstream {
     /// Once a sentence is complete, it speaks the sentence using the AI voice.
     pub struct SpeakStream {
         sentence_accumulator: SentenceAccumulator,
-        futures_ordered_kill_channel: flume::Sender<()>,
+        ai_tts_rx: flume::Receiver<String>,
+        futures_ordered_kill_tx: flume::Sender<()>,
         // Arc<Mutex<FuturesOrdered<impl Future<Output = Option<NamedTempFile>>>>>,
         ai_voice_sink: Arc<rodio::Sink>,
-        stream: rodio::OutputStream,
+        _stream: rodio::OutputStream,
         speech_speed: f32,
+        ai_audio_playing_rx: flume::Receiver<NamedTempFile>,
     }
 
     impl SpeakStream {
@@ -283,6 +285,7 @@ pub mod speakstream {
             // Create text to speech conversion thread
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
+            let thread_ai_tts_rx = ai_tts_rx.clone();
             thread::spawn(move || {
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
@@ -293,7 +296,7 @@ pub mod speakstream {
 
                 loop {
                     // Queue up any text segments to be turned into speech.
-                    for ai_text in ai_tts_rx.try_iter() {
+                    for ai_text in thread_ai_tts_rx.try_iter() {
                         futures_ordered.push_back(turn_text_to_speech(ai_text, 1.0));
                     }
 
@@ -336,10 +339,12 @@ pub mod speakstream {
 
             SpeakStream {
                 sentence_accumulator: SentenceAccumulator::new(ai_tts_tx),
-                futures_ordered_kill_channel: futures_ordered_kill_tx,
+                ai_tts_rx,
+                futures_ordered_kill_tx,
                 ai_voice_sink,
-                stream: _stream,
+                _stream,
                 speech_speed: 1.0,
+                ai_audio_playing_rx,
             }
         }
 
@@ -351,33 +356,25 @@ pub mod speakstream {
         fn stop_speech(&mut self) {
             // clear all speech channels, stop async executors, and stop the audio sink
 
-            // // stop the AI voice from speaking
-            // {
             //     // stop the LLM
             //     let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
             //     *llm_should_stop = true;
             //     drop(llm_should_stop);
 
-            //     // clear the sentence accumulator
-            //     let mut thread_sentence_accumulator =
-            //         thread_sentence_accumulator_mutex.lock().unwrap();
-            //     thread_sentence_accumulator.clear_buffer();
-            //     drop(thread_sentence_accumulator);
+            // clear the sentence accumulator
+            self.sentence_accumulator.clear_buffer();
 
-            //     // empty channel of all text messages queued up to be turned into audio speech
-            //     for _ in thread_ai_tts_rx.try_iter() {}
+            // empty channel of all text messages queued up to be turned into audio speech
+            for _ in self.ai_tts_rx.try_iter() {}
 
-            //     // empty the futures currently turning text to sound
-            //     let mut futures_ordered = thread_futures_ordered_mutex.lock().unwrap();
-            //     *futures_ordered = FuturesOrdered::new();
-            //     drop(futures_ordered);
+            // empty the futures currently turning text to sound
+            self.futures_ordered_kill_tx.send(()).unwrap();
 
             //     // clear the channel that passes audio files to the ai voice audio playing thread
-            //     for _ in thread_ai_audio_playing_rx.try_iter() {}
+            for _ in self.ai_audio_playing_rx.try_iter() {}
 
-            //     // stop the AI voice from speaking the current sentence
-            //     thread_ai_voice_sink.stop();
-            // }
+            // stop the AI voice from speaking the current sentence
+            self.ai_voice_sink.stop();
         }
     }
 }
