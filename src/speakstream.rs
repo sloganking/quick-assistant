@@ -1,20 +1,20 @@
 pub mod speakstream {
 
     use anyhow::Context;
-    use chrono::Local;
-    use dotenvy::dotenv;
+    
+    
     use futures::stream::FuturesOrdered;
     use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
     use rodio::OutputStream;
-    use std::env;
-    use std::fs::File;
-    use std::io::{stdout, BufReader, Write};
-    use std::path::{Path, PathBuf};
+    
+    
+    use std::io::{BufReader};
+    use std::path::{Path};
     use std::process::Command;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc};
     use std::thread;
     use tempfile::Builder;
-    use tempfile::{tempdir, NamedTempFile};
+    use tempfile::{NamedTempFile};
     // use async_openai::{
     //     types::{
     //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -25,20 +25,18 @@ pub mod speakstream {
     // };
     use async_openai::{
         types::{
-            ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-            ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-            CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
+            CreateSpeechRequestArgs, SpeechModel, Voice,
         },
         Client,
     };
     use async_std::future;
-    use clap::{Parser, Subcommand};
+    
     use colored::Colorize;
-    use cpal::traits::{DeviceTrait, HostTrait};
-    use rdev::{listen, Event};
-    use std::error::Error;
+    
+    
+    
     use std::time::Duration;
-    use uuid::Uuid;
+    
 
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);
@@ -220,7 +218,7 @@ pub mod speakstream {
             adjust_audio_file_speed(
                 ai_speech_segment_tempfile.path(),
                 sped_up_audio_path.path(),
-                speed as f32,
+                speed,
             );
 
             return Some(sped_up_audio_path);

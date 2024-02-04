@@ -4,12 +4,12 @@ use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
 use chrono::Local;
-use futures::stream::FuturesOrdered;
+
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
@@ -19,7 +19,7 @@ use async_openai::{
     types::{
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-        CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
+        CreateChatCompletionRequestArgs, Voice,
     },
     Client,
 };
@@ -577,7 +577,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 err
                             ));
 
-                            play_audio(&failed_temp_file.path());
+                            play_audio(failed_temp_file.path());
 
                             continue;
                         }
@@ -650,7 +650,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         err
                                     ));
 
-                                    play_audio(&failed_temp_file.path());
+                                    play_audio(failed_temp_file.path());
 
                                     break 'request;
                                 }
@@ -691,7 +691,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                             let mut thread_speak_stream =
                                                 thread_speak_stream_mutex.lock().unwrap();
-                                            thread_speak_stream.add_token(&content);
+                                            thread_speak_stream.add_token(content);
                                             drop(thread_speak_stream);
                                         }
                                     });
