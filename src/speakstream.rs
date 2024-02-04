@@ -101,6 +101,7 @@ pub mod speakstream {
 
         fn clear_buffer(&mut self) {
             self.buffer.clear();
+            println!("- Cleared buffer: \"{}\"", self.buffer);
         }
     }
 
@@ -275,21 +276,47 @@ pub mod speakstream {
                 loop {
                     // Queue up any text segments to be turned into speech.
                     for ai_text in thread_ai_tts_rx.try_iter() {
+                        println!("\n==== moved text from thread_ai_tts_rx to futures_ordered");
                         futures_ordered.push_back(turn_text_to_speech(ai_text, 1.0));
                     }
 
                     // Empty the futures ordered queue if the kill channel has received a message
                     for _ in futures_ordered_kill_rx.try_iter() {
-                        println!("Killing futures_ordered");
-                        futures_ordered = FuturesOrdered::new()
+                        println!("\n==== Killing futures_ordered");
+                        futures_ordered = FuturesOrdered::new();
+
+                        // Empty the channel of all text messages queued up to be turned into audio speech
+                        for _ in thread_ai_tts_rx.try_iter() {}
                     }
 
                     // Send any ready audio segments to the ai voice audio playing thread
+                    //
+                    // If futures_ordered has no futures to work on, this loop will be skipped
+                    // and not block. However if futures_ordered does have futures to work on,
+                    // this loop will block until the first future in queue is ready.
+                    // and outputed from the .next() call.
                     while let Some(tempfile_option) = runtime.block_on(futures_ordered.next()) {
                         match tempfile_option {
                             Some(tempfile) => {
-                                // send tempfile to ai voice audio playing thread
-                                ai_audio_playing_tx.send(tempfile).unwrap();
+                                let mut kill_signal_sent = false;
+                                // Empty the futures ordered queue if the kill channel has received a message
+                                for _ in futures_ordered_kill_rx.try_iter() {
+                                    println!(
+                                        "\n==== Killing futures_ordered ===== (inside while loop)"
+                                    );
+                                    futures_ordered = FuturesOrdered::new();
+
+                                    // Empty the channel of all text messages queued up to be turned into audio speech
+                                    for _ in thread_ai_tts_rx.try_iter() {}
+
+                                    kill_signal_sent = true;
+                                }
+
+                                if !kill_signal_sent {
+                                    // send tempfile to ai voice audio playing thread
+                                    ai_audio_playing_tx.send(tempfile).unwrap();
+                                    println!("\n==== sent tempfile to ai_audio_playing_tx");
+                                }
                             }
                             None => {
                                 // play_audio(&failed_temp_file.path());
@@ -347,16 +374,26 @@ pub mod speakstream {
             self.sentence_accumulator.clear_buffer();
 
             // empty channel of all text messages queued up to be turned into audio speech
-            for _ in self.ai_tts_rx.try_iter() {}
+            let mut count = 0;
+            for _ in self.ai_tts_rx.try_iter() {
+                count += 1;
+            }
+            println!("Cleared {} messages from ai_tts_rx", count);
 
             // empty the futures currently turning text to sound
             self.futures_ordered_kill_tx.send(()).unwrap();
+            println!("ordered futures killed");
 
             // clear the channel that passes audio files to the ai voice audio playing thread
-            for _ in self.ai_audio_playing_rx.try_iter() {}
+            let mut count = 0;
+            for _ in self.ai_audio_playing_rx.try_iter() {
+                count += 1;
+            }
+            println!("Cleared {} messages from ai_audio_playing_rx", count);
 
             // stop the AI voice from speaking the current sentence
             self.ai_voice_sink.stop();
+            println!("stopped ai voice sink");
         }
     }
 }
