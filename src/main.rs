@@ -352,7 +352,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let _ = dotenv();
 
-    let (speak_stream, _stream) = ss::SpeakStream::new(opt.speech_speed);
+    let ai_voice: Voice = match opt.ai_voice {
+        Some(voice) => voice.into(),
+        None => Voice::Echo,
+    };
+    let (speak_stream, _stream) = ss::SpeakStream::new(ai_voice, opt.speech_speed);
     let speak_stream_mutex = Arc::new(Mutex::new(speak_stream));
 
     let (audio_playing_tx, audio_playing_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =

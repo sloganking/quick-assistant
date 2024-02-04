@@ -46,6 +46,8 @@ pub mod speakstream {
             }
         }
 
+        /// Adds a token to the sentence accumulator.
+        /// Returns a vector of sentences that have been completed.
         fn add_token(&mut self, token: &str) -> Vec<String> {
             let mut sentences: Vec<String> = Vec::new();
             for char in token.chars() {
@@ -139,14 +141,19 @@ pub mod speakstream {
         };
     }
 
-    async fn turn_text_to_speech(ai_text: String, speed: f32) -> Option<NamedTempFile> {
+    /// Turns text into speech using the AI voice.
+    async fn turn_text_to_speech(
+        ai_text: String,
+        speed: f32,
+        voice: &Voice,
+    ) -> Option<NamedTempFile> {
         let client = Client::new();
 
         // Turn AI's response into speech
 
         let request = CreateSpeechRequestArgs::default()
             .input(ai_text)
-            .voice(Voice::Echo)
+            .voice(voice.clone())
             .model(SpeechModel::Tts1)
             .build()
             .unwrap();
@@ -231,7 +238,7 @@ pub mod speakstream {
     }
 
     impl SpeakStream {
-        pub fn new(speech_speed: f32) -> (Self, OutputStream) {
+        pub fn new(voice: Voice, speech_speed: f32) -> (Self, OutputStream) {
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
                 flume::unbounded();
@@ -255,6 +262,7 @@ pub mod speakstream {
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
             let thread_ai_tts_rx = ai_tts_rx.clone();
+            let thread_voice = voice.clone();
             thread::spawn(move || {
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
@@ -266,7 +274,11 @@ pub mod speakstream {
                 loop {
                     // Queue up any text segments to be turned into speech.
                     for ai_text in thread_ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(ai_text, speech_speed));
+                        futures_ordered.push_back(turn_text_to_speech(
+                            ai_text,
+                            speech_speed,
+                            &thread_voice,
+                        ));
                     }
 
                     // Empty the futures ordered queue if the kill channel has received a message
