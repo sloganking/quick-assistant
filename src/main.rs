@@ -709,12 +709,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 key_pressed = false;
                                 // handle key release
 
-                                // allow the llm to start
-                                let mut llm_should_stop =
-                                    thread_llm_should_stop_mutex.lock().unwrap();
-                                *llm_should_stop = false;
-                                drop(llm_should_stop);
-
                                 // get elapsed time since recording started
                                 let elapsed = match recording_start.elapsed() {
                                     Ok(elapsed) => elapsed,
@@ -837,6 +831,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .unwrap()
                             .into(),
                     );
+
+                    // Make sure the LLM token generation is allowed to start
+                    // It should only be stopped when the LLM is running.
+                    // Since it's not running now, it should be allowed to start.
+                    let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
+                    *llm_should_stop = false;
+                    drop(llm_should_stop);
 
                     // repeatedly create request until it's answered
                     let mut displayed_ai_label = false;
