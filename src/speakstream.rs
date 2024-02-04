@@ -1,7 +1,10 @@
 pub mod speakstream {
 
     use anyhow::Context;
+    use chrono::Local;
     use dotenvy::dotenv;
+    use futures::stream::FuturesOrdered;
+    use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
     use rodio::OutputStream;
     use std::env;
     use std::fs::File;
@@ -9,15 +12,17 @@ pub mod speakstream {
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::sync::{Arc, Mutex};
-    use tempfile::{tempdir, NamedTempFile};
-    // mod transcribe;
-    // use crate::transcribe::trans;
-    use chrono::Local;
-    use futures::stream::FuturesOrdered;
-    use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
     use std::thread;
     use tempfile::Builder;
-    // mod record;
+    use tempfile::{tempdir, NamedTempFile};
+    // use async_openai::{
+    //     types::{
+    //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    //         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+    //         CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
+    //     },
+    //     Client,
+    // };
     use async_openai::{
         types::{
             ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
