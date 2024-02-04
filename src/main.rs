@@ -545,8 +545,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
-                // let mut sentence_accumulator = SentenceAccumulator::new(ai_tts_tx);
-
                 message_history.push(
                     ChatCompletionRequestSystemMessageArgs::default()
                         .content("You are a desktop voice assistant. Your responses will be spoken by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more'")

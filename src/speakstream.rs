@@ -36,19 +36,18 @@ pub mod speakstream {
     struct SentenceAccumulator {
         buffer: String,
         sentence_end_chars: Vec<char>,
-        ai_voice_channel_tx: flume::Sender<String>,
     }
 
     impl SentenceAccumulator {
-        fn new(channel: flume::Sender<String>) -> Self {
+        fn new() -> Self {
             SentenceAccumulator {
                 buffer: String::new(),
                 sentence_end_chars: vec!['.', '?', '!'],
-                ai_voice_channel_tx: channel,
             }
         }
 
-        fn add_token(&mut self, token: &str) {
+        fn add_token(&mut self, token: &str) -> Vec<String> {
+            let mut sentences: Vec<String> = Vec::new();
             for char in token.chars() {
                 self.buffer.push(char);
 
@@ -57,38 +56,38 @@ pub mod speakstream {
                         if
                         // If the second to last character is a sentence ending character
                         self.sentence_end_chars.contains(&second_to_last_char)
-                    // and the last character is whitespace.
+                        // and the last character is whitespace.
                         && self
                             .buffer
                             .chars()
                             .last()
                             .map_or(false, |c| c.is_whitespace())
                         {
-                            self.process_sentence();
+                            let sentence = self.buffer.trim();
+                            if !sentence.is_empty() {
+                                sentences.push(sentence.to_string());
+                            }
                             self.buffer.clear();
                         }
                     }
                 }
             }
-        }
 
-        fn process_sentence(&self) {
-            // Trim the sentence before processing to remove any leading or trailing whitespace.
-            let sentence = self.buffer.trim();
-            if !sentence.is_empty() {
-                // println!("\n{}{}", "Complete sentence: ".yellow(), sentence);
-
-                // Turn the sentence into speech
-                self.ai_voice_channel_tx.send(sentence.to_string()).unwrap();
-            }
+            sentences
         }
 
         /// Called at the end of the conversation to process the last sentence.
         /// This is necessary since the last character may not be whitespace preceded
         /// by a sentence ending character.
-        fn complete_sentence(&mut self) {
-            self.process_sentence();
+        fn complete_sentence(&mut self) -> Option<String> {
+            let sentence = self.buffer.trim();
+            let sentence_option = if !sentence.is_empty() {
+                Some(sentence.to_string())
+            } else {
+                None
+            };
             self.buffer.clear();
+            sentence_option
         }
 
         fn clear_buffer(&mut self) {
@@ -224,6 +223,7 @@ pub mod speakstream {
     /// Once a sentence is complete, it speaks the sentence using the AI voice.
     pub struct SpeakStream {
         sentence_accumulator: SentenceAccumulator,
+        ai_tts_tx: flume::Sender<String>,
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
         ai_voice_sink: Arc<rodio::Sink>,
@@ -329,7 +329,8 @@ pub mod speakstream {
 
             (
                 SpeakStream {
-                    sentence_accumulator: SentenceAccumulator::new(ai_tts_tx),
+                    sentence_accumulator: SentenceAccumulator::new(),
+                    ai_tts_tx,
                     ai_tts_rx,
                     futures_ordered_kill_tx,
                     ai_voice_sink,
@@ -341,12 +342,17 @@ pub mod speakstream {
 
         pub fn add_token(&mut self, token: &str) {
             // Add the token to the sentence accumulator
-            self.sentence_accumulator.add_token(token);
+            let sentences = self.sentence_accumulator.add_token(token);
+            for sentence in sentences {
+                self.ai_tts_tx.send(sentence).unwrap();
+            }
         }
 
         pub fn complete_sentence(&mut self) {
             // Process the last sentence
-            self.sentence_accumulator.complete_sentence();
+            if let Some(sentence) = self.sentence_accumulator.complete_sentence() {
+                self.ai_tts_tx.send(sentence).unwrap();
+            }
         }
 
         pub fn stop_speech(&mut self) {
