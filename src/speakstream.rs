@@ -2,6 +2,7 @@ pub mod speakstream {
 
     use anyhow::Context;
     use dotenvy::dotenv;
+    use rodio::OutputStream;
     use std::env;
     use std::fs::File;
     use std::io::{stdout, BufReader, Write};
@@ -234,13 +235,12 @@ pub mod speakstream {
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
         ai_voice_sink: Arc<rodio::Sink>,
-        _stream: rodio::OutputStream,
         speech_speed: f32,
         ai_audio_playing_rx: flume::Receiver<NamedTempFile>,
     }
 
     impl SpeakStream {
-        pub fn new() -> Self {
+        pub fn new() -> (Self, OutputStream) {
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
                 flume::unbounded();
@@ -280,6 +280,7 @@ pub mod speakstream {
 
                     // Empty the futures ordered queue if the kill channel has received a message
                     for _ in futures_ordered_kill_rx.try_iter() {
+                        println!("Killing futures_ordered");
                         futures_ordered = FuturesOrdered::new()
                     }
 
@@ -304,6 +305,7 @@ pub mod speakstream {
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             tokio::spawn(async move {
                 // println!("Waiting for ai_voice_playing_rx");
+
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
@@ -315,15 +317,17 @@ pub mod speakstream {
                 }
             });
 
-            SpeakStream {
-                sentence_accumulator: SentenceAccumulator::new(ai_tts_tx),
-                ai_tts_rx,
-                futures_ordered_kill_tx,
-                ai_voice_sink,
+            (
+                SpeakStream {
+                    sentence_accumulator: SentenceAccumulator::new(ai_tts_tx),
+                    ai_tts_rx,
+                    futures_ordered_kill_tx,
+                    ai_voice_sink,
+                    speech_speed: 1.0,
+                    ai_audio_playing_rx,
+                },
                 _stream,
-                speech_speed: 1.0,
-                ai_audio_playing_rx,
-            }
+            )
         }
 
         pub fn add_token(&mut self, token: &str) {
@@ -331,13 +335,13 @@ pub mod speakstream {
             self.sentence_accumulator.add_token(token);
         }
 
+        pub fn complete_sentence(&mut self) {
+            // Process the last sentence
+            self.sentence_accumulator.complete_sentence();
+        }
+
         pub fn stop_speech(&mut self) {
             // clear all speech channels, stop async executors, and stop the audio sink
-
-            //     // stop the LLM
-            //     let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
-            //     *llm_should_stop = true;
-            //     drop(llm_should_stop);
 
             // clear the sentence accumulator
             self.sentence_accumulator.clear_buffer();
@@ -348,7 +352,7 @@ pub mod speakstream {
             // empty the futures currently turning text to sound
             self.futures_ordered_kill_tx.send(()).unwrap();
 
-            //     // clear the channel that passes audio files to the ai voice audio playing thread
+            // clear the channel that passes audio files to the ai voice audio playing thread
             for _ in self.ai_audio_playing_rx.try_iter() {}
 
             // stop the AI voice from speaking the current sentence
