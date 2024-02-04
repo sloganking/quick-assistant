@@ -1,5 +1,43 @@
 pub mod speakstream {
+    // use anyhow::Context;
+    // use async_openai::{
+    //     types::{
+    //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    //         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
+    //         CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
+    //     },
+    //     Client,
+    // };
+    // use async_std::future;
+    // use clap::{Parser, Subcommand};
+    // use colored::Colorize;
+    // use futures::stream::FuturesOrdered;
+    // use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
+    // use futures::Future;
+    // use rodio::OutputStream;
+    // use std::pin::Pin;
+    // use std::sync::{Arc, Mutex};
+    // use std::thread;
+    // use std::{io::BufReader, time::Duration};
+    // use tempfile::{Builder, NamedTempFile};
+
     use anyhow::Context;
+    use dotenvy::dotenv;
+    use std::env;
+    use std::fs::File;
+    use std::io::{stdout, BufReader, Write};
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::sync::{Arc, Mutex};
+    use tempfile::{tempdir, NamedTempFile};
+    // mod transcribe;
+    // use crate::transcribe::trans;
+    use chrono::Local;
+    use futures::stream::FuturesOrdered;
+    use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
+    use std::thread;
+    use tempfile::Builder;
+    // mod record;
     use async_openai::{
         types::{
             ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -9,14 +47,13 @@ pub mod speakstream {
         Client,
     };
     use async_std::future;
+    use clap::{Parser, Subcommand};
     use colored::Colorize;
-    use futures::stream::FuturesOrdered;
-    use futures::Future;
-    use rodio::OutputStream;
-    use std::pin::Pin;
-    use std::sync::{Arc, Mutex};
-    use std::{io::BufReader, time::Duration};
-    use tempfile::{Builder, NamedTempFile};
+    use cpal::traits::{DeviceTrait, HostTrait};
+    use rdev::{listen, Event};
+    use std::error::Error;
+    use std::time::Duration;
+    use uuid::Uuid;
 
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);
@@ -207,15 +244,18 @@ pub mod speakstream {
         Some(ai_speech_segment_tempfile)
     }
 
+    fn get_second_to_last_char(s: &str) -> Option<char> {
+        s.chars().rev().nth(1)
+    }
+
     /// SpeakStream is a struct that accumulates tokens into sentences
     /// Once a sentence is complete, it speaks the sentence using the AI voice.
     pub struct SpeakStream {
         sentence_accumulator: SentenceAccumulator,
-        futures_ordered_mutex:
-            Arc<Mutex<FuturesOrdered<Pin<Box<dyn Future<Output = Option<NamedTempFile>>>>>>>,
+        futures_ordered_kill_channel: flume::Sender<()>,
         // Arc<Mutex<FuturesOrdered<impl Future<Output = Option<NamedTempFile>>>>>,
         ai_voice_sink: Arc<rodio::Sink>,
-        stream: OutputStream,
+        stream: rodio::OutputStream,
         speech_speed: f32,
     }
 
@@ -224,10 +264,6 @@ pub mod speakstream {
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
                 flume::unbounded();
-
-            // Create a mutex to hold the futures ordered queue
-            // Used to turn text into speech
-            let futures_ordered_mutex = Arc::new(Mutex::new(FuturesOrdered::new()));
 
             // Create the AI voice audio sink
             let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
@@ -239,21 +275,31 @@ pub mod speakstream {
                 flume::Receiver<NamedTempFile>,
             ) = flume::unbounded();
 
+            let (futures_ordered_kill_tx, futures_ordered_kill_rx): (
+                flume::Sender<()>,
+                flume::Receiver<()>,
+            ) = flume::unbounded();
+
             // Create text to speech conversion thread
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
-            let thread_futures_ordered_mutex = futures_ordered_mutex.clone();
             thread::spawn(move || {
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
 
-                loop {
-                    let mut futures_ordered = thread_futures_ordered_mutex.lock().unwrap();
+                // Create the futures ordered queue Used to turn text into speech
+                let mut futures_ordered = FuturesOrdered::new();
 
+                loop {
                     // Queue up any text segments to be turned into speech.
                     for ai_text in ai_tts_rx.try_iter() {
                         futures_ordered.push_back(turn_text_to_speech(ai_text, 1.0));
+                    }
+
+                    // Empty the futures ordered queue if the kill channel has received a message
+                    for _ in futures_ordered_kill_rx.try_iter() {
+                        futures_ordered = FuturesOrdered::new()
                     }
 
                     // Send any ready audio segments to the ai voice audio playing thread
@@ -269,7 +315,6 @@ pub mod speakstream {
                             }
                         }
                     }
-                    drop(futures_ordered);
                 }
             });
 
@@ -291,7 +336,7 @@ pub mod speakstream {
 
             SpeakStream {
                 sentence_accumulator: SentenceAccumulator::new(ai_tts_tx),
-                futures_ordered_mutex,
+                futures_ordered_kill_channel: futures_ordered_kill_tx,
                 ai_voice_sink,
                 stream: _stream,
                 speech_speed: 1.0,
