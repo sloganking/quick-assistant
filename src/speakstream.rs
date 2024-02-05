@@ -320,8 +320,6 @@ pub mod speakstream {
                     // Empty the futures ordered queue if the kill channel has received a message
                     for _ in futures_ordered_kill_rx.try_iter() {
                         futures_ordered = FuturesOrdered::new();
-                        // Empty the channel of all text messages queued up to be turned into audio speech
-                        for _ in thread_ai_tts_rx.try_iter() {}
                     }
 
                     // Send any ready audio segments to the ai voice audio playing thread
@@ -337,10 +335,6 @@ pub mod speakstream {
                                 // Empty the futures ordered queue if the kill channel has received a message
                                 for _ in futures_ordered_kill_rx.try_iter() {
                                     futures_ordered = FuturesOrdered::new();
-
-                                    // Empty the channel of all text messages queued up to be turned into audio speech
-                                    for _ in thread_ai_tts_rx.try_iter() {}
-
                                     kill_signal_sent = true;
                                 }
 
