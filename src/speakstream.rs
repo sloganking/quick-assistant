@@ -53,7 +53,37 @@ pub mod speakstream {
             for char in token.chars() {
                 self.buffer.push(char);
 
-                if self.buffer.len() > 50 {
+                if self.buffer.len() > 300 {
+                    // println!();
+                    // println!("Bad cut");
+                    // println!();
+                    // Push the sentence to the sentences vector and clear the buffer
+                    {
+                        let sentence = self.buffer.trim();
+                        if !sentence.is_empty() {
+                            sentences.push(sentence.to_string());
+                        }
+                        self.buffer.clear();
+                    }
+                } else if self.buffer.len() > 200
+                    && self
+                        .buffer
+                        .chars()
+                        .last()
+                        .map_or(false, |c| c.is_whitespace())
+                {
+                    // println!();
+                    // println!("Good cut");
+                    // println!();
+                    // Push the sentence to the sentences vector and clear the buffer
+                    {
+                        let sentence = self.buffer.trim();
+                        if !sentence.is_empty() {
+                            sentences.push(sentence.to_string());
+                        }
+                        self.buffer.clear();
+                    }
+                } else if self.buffer.len() > 15 {
                     if let Some(second_to_last_char) = get_second_to_last_char(&self.buffer) {
                         if
                         // If the second to last character is a sentence ending character
@@ -65,11 +95,17 @@ pub mod speakstream {
                             .last()
                             .map_or(false, |c| c.is_whitespace())
                         {
-                            let sentence = self.buffer.trim();
-                            if !sentence.is_empty() {
-                                sentences.push(sentence.to_string());
+                            // println!();
+                            // println!("Perfect cut");
+                            // println!();
+                            // Push the sentence to the sentences vector and clear the buffer
+                            {
+                                let sentence = self.buffer.trim();
+                                if !sentence.is_empty() {
+                                    sentences.push(sentence.to_string());
+                                }
+                                self.buffer.clear();
                             }
-                            self.buffer.clear();
                         }
                     }
                 }
