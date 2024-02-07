@@ -262,6 +262,25 @@ pub mod speakstream {
         s.chars().rev().nth(1)
     }
 
+    /// Receives the next future from the futures ordered queue.
+    /// Does not return until a future has completed and returned a result.
+    /// Similar to channel.recv_async() methods.
+    async fn recv_future_ordered(futures_ordered: &mut FuturesOrdered<impl futures::Future<Output = Option<NamedTempFile>>>) -> Option<NamedTempFile>{
+        loop{
+            let futures_ordered_option = futures_ordered.next().await;
+
+            // Not sure why but this sleep is necessary to prevent the loop from blocking
+            // other futures from being polled in a tokio::select!() macro.
+            // My guess is that the loop runs so often that tokio keeps this thread running
+            // and doesn't poll other futures.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            if let Some(tempfile_option) = futures_ordered_option{
+                return tempfile_option;
+            }
+        }
+    }
+
     /// SpeakStream is a struct that accumulates tokens into sentences
     /// Once a sentence is complete, it speaks the sentence using the AI voice.
     pub struct SpeakStream {
@@ -412,9 +431,10 @@ pub mod speakstream {
 
                     runtime.block_on(async {
                         tokio::select! {
-                            sleep = tokio::time::sleep(Duration::from_secs(1)) => {
-                                println!("{} {:?}", "_ = tokio::time::sleep(Duration::from_secs(1)) => ".purple(), sleep);
-                            }
+                            // sleep = tokio::time::sleep(Duration::from_secs(1)) => {
+                            //     println!("{} {:?}", "_ = tokio::time::sleep(Duration::from_secs(1)) => ".purple(), sleep);
+                            // }
+
                             // Queue up any text segments to be turned into speech.
                             ai_text_result = thread_ai_tts_rx.recv_async() => {
 
@@ -426,6 +446,8 @@ pub mod speakstream {
                                     &thread_voice,
                                 ));
                             }
+
+                            // Handle kill signal
                             result = futures_ordered_kill_rx.recv_async() => {
                                 let _ = result.unwrap();
 
@@ -434,22 +456,17 @@ pub mod speakstream {
 
                             }
 
-                            futures_ordered_option = futures_ordered.next() => {
-                                // println!("{}","futures_ordered.next()".purple());
-                                
-                                if let Some(tempfile_option) = futures_ordered_option{
-                                    println!("{}", "tempfile_option:".purple());
-                                    if let Some(tempfile) = tempfile_option {
-                                        // send tempfile to ai voice audio playing thread
-                                        println!("{}", "tempfile being sent to play audio:".purple());
-                                        ai_audio_playing_tx.send_async(tempfile).await.unwrap();
-                                    }
+                            // Send any ready audio segments to the ai voice audio playing thread
+                            tempfile_option = recv_future_ordered(&mut futures_ordered) => {
+                                println!("{}","futures_ordered.next()".purple());
+                               
+                                if let Some(tempfile) = tempfile_option {
+                                    // send tempfile to ai voice audio playing thread
+                                    println!("{}", "tempfile being sent to play audio:".purple());
+                                    ai_audio_playing_tx.send_async(tempfile).await.unwrap();
                                 }
-                                else{
-                                    // println!("{}","futures_ordered.next()".purple());
-                                }
-                                
                             }
+                            
                         }
                     });
                 }
