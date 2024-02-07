@@ -308,19 +308,24 @@ pub mod speakstream {
                 let mut futures_ordered = FuturesOrdered::new();
 
                 loop {
+                    // println!("{}", "loop".purple());
                     // Queue up any text segments to be turned into speech.
-                    for ai_text in thread_ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(
-                            ai_text,
-                            speech_speed,
-                            &thread_voice,
-                        ));
-                    }
+                    // println!("Queue up any text segments to be turned into speech.");
+                    // for ai_text in thread_ai_tts_rx.try_iter() {
+                    //     println!("thread_ai_tts_rx received... Pushing into futures_ordered");
+                    //     futures_ordered.push_back(turn_text_to_speech(
+                    //         ai_text,
+                    //         speech_speed,
+                    //         &thread_voice,
+                    //     ));
+                    // }
 
                     // Empty the futures ordered queue if the kill channel has received a message
-                    for _ in futures_ordered_kill_rx.try_iter() {
-                        futures_ordered = FuturesOrdered::new();
-                    }
+                    // println!("Empty the futures ordered queue if the kill channel has received a message");
+                    // for _ in futures_ordered_kill_rx.try_iter() {
+                    //     println!("{}", "futures_ordered = FuturesOrdered::new();".purple());
+                    //     futures_ordered = FuturesOrdered::new();
+                    // }
 
                     // Send any ready audio segments to the ai voice audio playing thread
                     //
@@ -328,41 +333,122 @@ pub mod speakstream {
                     // and not block. However if futures_ordered does have futures to work on,
                     // this loop will block until the first future in queue is ready.
                     // and outputed from the .next() call.
+                    // runtime.block_on(async {
+                    //     tokio::select! {
+                    //         sleep = tokio::time::sleep(Duration::from_secs(1)) => {
+                    //             println!("{} {:?}", "_ = tokio::time::sleep(Duration::from_secs(1)) => ".purple(), sleep);
+                    //         }
+
+                    //         // Queue up any text segments to be turned into speech.
+                    //         ai_text_result = async {thread_ai_tts_rx.recv()} => {
+
+                    //             println!("{}", "thread_ai_tts_rx received... Pushing into futures_ordered".purple());
+                    //             let ai_text = ai_text_result.unwrap();
+                    //             futures_ordered.push_back(turn_text_to_speech(
+                    //                 ai_text,
+                    //                 speech_speed,
+                    //                 &thread_voice,
+                    //             ));
+                    //         }
+
+                    //         // tempfile_option = async {
+                    //         //     let mut result = None;
+                    //         //     loop {
+                    //         //         if let Some(tempfile_option) = futures_ordered.next().await{
+                    //         //             result = tempfile_option;
+                    //         //             break;
+                    //         //         }
+                    //         //     }
+                    //         //     result
+                    //         // } => {
+                    //         //     println!("{} {:?}","tempfile_option:".purple(), tempfile_option);
+                    //         // }
+
+                    //         timeout_option = future::timeout(Duration::from_secs(1), futures_ordered.next()) => {
+                    //             match timeout_option{
+                    //                 Ok(next_option) => {
+                    //                     if let Some(ref tempfile_option) = next_option{
+                    //                         println!("{} {:?}", "tempfile_option:".purple(), tempfile_option);
+                    //                     }
+                    //                     println!("{} {:?}", "Next option!".purple(), next_option);
+                    //                 }
+                    //                 Err(x) => {
+                    //                     println!("{} {:?}", "Ran out of time!".purple(), x);
+                    //                 }
+                    //             }
+                    //         }
+
+                    //         //     // outer_tempfile_option = tempfile_option;
+
+                    //         //     match tempfile_option {
+                    //         //         Some(tempfile) => {
+                    //         //             // let mut kill_signal_sent = false;
+                    //         //             // // Empty the futures ordered queue if the kill channel has received a message
+                    //         //             // for _ in futures_ordered_kill_rx.try_iter() {
+                    //         //             //     futures_ordered = FuturesOrdered::new();
+                    //         //             //     kill_signal_sent = true;
+                    //         //             // }
+
+                    //         //             // if !kill_signal_sent {
+                    //         //                 // send tempfile to ai voice audio playing thread
+                    //         //                 ai_audio_playing_tx.send(tempfile).unwrap();
+                    //         //             // }
+                    //         //         }
+                    //         //         None => {
+                    //         //             // play_audio(&failed_temp_file.path());
+                    //         //             println_error("failed to turn text to speech");
+                    //         //         }
+                    //         //     }
+                    //         // }
+                    //         result = async {futures_ordered_kill_rx.recv()} => {
+                    //             let _ = result.unwrap();
+
+                    //             println!("{}", "_ = futures_ordered_kill_rx.recv() =>".purple());
+                    //             futures_ordered = FuturesOrdered::new();
+
+                    //         }
+                    //     }
+                    // });
+
                     runtime.block_on(async {
                         tokio::select! {
-                            _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                                println!("_ = tokio::time::sleep(Duration::from_secs(1)) => ");
+                            sleep = tokio::time::sleep(Duration::from_secs(1)) => {
+                                println!("{} {:?}", "_ = tokio::time::sleep(Duration::from_secs(1)) => ".purple(), sleep);
                             }
-                            tempfile_option_option = futures_ordered.next() => {
-                                if let Some(tempfile_option) = tempfile_option_option {
-                                    println!("tempfile_option = futures_ordered.next() =>");
-                                    // outer_tempfile_option = tempfile_option;
+                            // Queue up any text segments to be turned into speech.
+                            ai_text_result = thread_ai_tts_rx.recv_async() => {
 
-                                    match tempfile_option {
-                                        Some(tempfile) => {
-                                            let mut kill_signal_sent = false;
-                                            // Empty the futures ordered queue if the kill channel has received a message
-                                            for _ in futures_ordered_kill_rx.try_iter() {
-                                                futures_ordered = FuturesOrdered::new();
-                                                kill_signal_sent = true;
-                                            }
+                                println!("{}", "thread_ai_tts_rx received... Pushing into futures_ordered".purple());
+                                let ai_text = ai_text_result.unwrap();
+                                futures_ordered.push_back(turn_text_to_speech(
+                                    ai_text,
+                                    speech_speed,
+                                    &thread_voice,
+                                ));
+                            }
+                            result = futures_ordered_kill_rx.recv_async() => {
+                                let _ = result.unwrap();
 
-                                            if !kill_signal_sent {
-                                                // send tempfile to ai voice audio playing thread
-                                                ai_audio_playing_tx.send(tempfile).unwrap();
-                                            }
-                                        }
-                                        None => {
-                                            // play_audio(&failed_temp_file.path());
-                                            println_error("failed to turn text to speech");
-                                        }
+                                println!("{}", "_ = futures_ordered_kill_rx.recv() =>".purple());
+                                futures_ordered = FuturesOrdered::new();
+
+                            }
+
+                            futures_ordered_option = futures_ordered.next() => {
+                                // println!("{}","futures_ordered.next()".purple());
+                                
+                                if let Some(tempfile_option) = futures_ordered_option{
+                                    println!("{}", "tempfile_option:".purple());
+                                    if let Some(tempfile) = tempfile_option {
+                                        // send tempfile to ai voice audio playing thread
+                                        println!("{}", "tempfile being sent to play audio:".purple());
+                                        ai_audio_playing_tx.send_async(tempfile).await.unwrap();
                                     }
                                 }
-
-                            }
-                            _ = async {futures_ordered_kill_rx.recv()} => {
-                                println!("_ = futures_ordered_kill_rx.recv() =>");
-                                futures_ordered = FuturesOrdered::new();
+                                else{
+                                    // println!("{}","futures_ordered.next()".purple());
+                                }
+                                
                             }
                         }
                     });
