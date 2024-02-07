@@ -11,7 +11,6 @@ use chrono::Local;
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
-use transcribe::trans;
 mod record;
 use async_openai::{
     types::{
@@ -568,7 +567,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let transcription_result = match runtime.block_on(future::timeout(
                         Duration::from_secs(10),
-                        trans::transcribe(&client, &audio_path),
+                        transcribe::transcribe(&client, &audio_path),
                     )) {
                         Ok(transcription_result) => transcription_result,
                         Err(err) => {
