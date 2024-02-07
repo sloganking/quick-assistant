@@ -328,27 +328,44 @@ pub mod speakstream {
                     // and not block. However if futures_ordered does have futures to work on,
                     // this loop will block until the first future in queue is ready.
                     // and outputed from the .next() call.
-                    while let Some(tempfile_option) = runtime.block_on(futures_ordered.next()) {
-                        match tempfile_option {
-                            Some(tempfile) => {
-                                let mut kill_signal_sent = false;
-                                // Empty the futures ordered queue if the kill channel has received a message
-                                for _ in futures_ordered_kill_rx.try_iter() {
-                                    futures_ordered = FuturesOrdered::new();
-                                    kill_signal_sent = true;
+                    runtime.block_on(async {
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                                println!("_ = tokio::time::sleep(Duration::from_secs(1)) => ");
+                            }
+                            tempfile_option_option = futures_ordered.next() => {
+                                if let Some(tempfile_option) = tempfile_option_option {
+                                    println!("tempfile_option = futures_ordered.next() =>");
+                                    // outer_tempfile_option = tempfile_option;
+
+                                    match tempfile_option {
+                                        Some(tempfile) => {
+                                            let mut kill_signal_sent = false;
+                                            // Empty the futures ordered queue if the kill channel has received a message
+                                            for _ in futures_ordered_kill_rx.try_iter() {
+                                                futures_ordered = FuturesOrdered::new();
+                                                kill_signal_sent = true;
+                                            }
+
+                                            if !kill_signal_sent {
+                                                // send tempfile to ai voice audio playing thread
+                                                ai_audio_playing_tx.send(tempfile).unwrap();
+                                            }
+                                        }
+                                        None => {
+                                            // play_audio(&failed_temp_file.path());
+                                            println_error("failed to turn text to speech");
+                                        }
+                                    }
                                 }
 
-                                if !kill_signal_sent {
-                                    // send tempfile to ai voice audio playing thread
-                                    ai_audio_playing_tx.send(tempfile).unwrap();
-                                }
                             }
-                            None => {
-                                // play_audio(&failed_temp_file.path());
-                                println_error("failed to turn text to speech");
+                            _ = async {futures_ordered_kill_rx.recv()} => {
+                                println!("_ = futures_ordered_kill_rx.recv() =>");
+                                futures_ordered = FuturesOrdered::new();
                             }
                         }
-                    }
+                    });
                 }
             });
 
