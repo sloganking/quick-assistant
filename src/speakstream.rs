@@ -271,14 +271,17 @@ pub mod speakstream {
         loop {
             let futures_ordered_option = futures_ordered.next().await;
 
-            // Not sure why but this sleep is necessary to prevent the loop from blocking
-            // other futures from being polled in a tokio::select!() macro.
-            // My guess is that the loop runs so often that tokio keeps this thread running
-            // and doesn't poll other futures.
-            tokio::time::sleep(Duration::from_millis(100)).await;
-
             if let Some(tempfile_option) = futures_ordered_option {
+                // This function is technically not cancel-safe, because if the function
+                // is canceled at the location of this comment, after `futures_ordered.next()`
+                // but before `return tempfile_option;`, the value will be lost.
                 return tempfile_option;
+            } else {
+                // Not sure why but this sleep is necessary to prevent the loop from blocking
+                // other futures from being polled in a tokio::select!() macro.
+                // My guess is that the loop runs so often that tokio keeps this thread running
+                // and doesn't poll other futures.
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
     }
