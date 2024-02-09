@@ -181,7 +181,7 @@ pub mod speakstream {
     async fn turn_text_to_speech(
         ai_text: String,
         speed: f32,
-        voice: &Voice,
+        voice: Voice,
     ) -> Option<NamedTempFile> {
         let client = Client::new();
 
@@ -299,37 +299,46 @@ pub mod speakstream {
             // the ai voice audio playing thread
             let thread_ai_tts_rx = ai_tts_rx.clone();
             let thread_voice = voice.clone();
-            thread::spawn(move || {
-                let runtime = tokio::runtime::Runtime::new()
-                    .context("Failed to create tokio runtime")
-                    .unwrap();
-
+            tokio::spawn(async move {
                 // Create the futures ordered queue Used to turn text into speech
-                let (mut converting_tx, converting_rx) = tokio::sync::mpsc::unbounded_channel();
+                // let (mut converting_tx, mut converting_rx) = tokio::sync::mpsc::unbounded_channel();
+                let (converting_tx, converting_rx) = flume::unbounded();
 
-                let handle = runtime.handle();
-
-                handle.spawn(async {
-                    loop {
+                {
+                    let converting_tx = converting_tx.clone();
+                    let thread_voice = thread_voice.clone();
+                    tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
-                            converting_tx.send(runtime.handle().spawn(turn_text_to_speech(
-                                ai_text,
-                                speech_speed,
-                                &thread_voice,
-                            )));
+                            let thread_voice = thread_voice.clone();
+                            converting_tx
+                                .send_async(tokio::spawn(async move {
+                                    turn_text_to_speech(ai_text, speech_speed, thread_voice)
+                                }))
+                                .await
+                                .unwrap();
+                            println!("{}", "converting_tx.send_async()".purple());
                         }
-                    }
-                });
+                        println!("exited loop 1");
+                    });
+                }
 
-                handle.spawn(async {
-                    // Empty the futures ordered queue if the kill channel has received a message
-                    while let Ok(_) = futures_ordered_kill_rx.recv_async().await {
-                        while let Ok(handle) = converting_rx.try_recv() {
-                            let _ = handle.abort();
+                {
+                    let converting_rx = converting_rx.clone();
+                    // let futures_ordered_kill_rx = futures_ordered_kill_rx.clone();
+                    tokio::spawn(async move {
+                        // Empty the futures ordered queue if the kill channel has received a message
+                        while let Ok(_) = futures_ordered_kill_rx.recv() {
+                            println!("{}", "Kill order received".purple());
+                            while let Ok(handle) = converting_rx.try_recv() {
+                                handle.abort();
+                                println!("{}", "handle.abort()".purple());
+                            }
+                            println!("{}", "exited while abort loop".purple());
                         }
-                    }
-                });
+                        println!("exited loop 2");
+                    });
+                }
 
                 loop {
                     // Send any ready audio segments to the ai voice audio playing thread
@@ -338,22 +347,13 @@ pub mod speakstream {
                     // and not block. However if futures_ordered does have futures to work on,
                     // this loop will block until the first future in queue is ready.
                     // and outputed from the .next() call.
-                    while let Some(tempfile_option) =
-                        runtime.block_on(async { converting_rx.recv().await.unwrap().await })
-                    {
+                    while let Ok(handle) = converting_rx.recv_async().await.unwrap().await {
+                        println!("{}", "awaiting handle result".yellow());
+                        let tempfile_option = handle.await;
+                        println!("{}", "Sending handle result".red());
                         match tempfile_option {
                             Some(tempfile) => {
-                                let mut kill_signal_sent = false;
-                                // Empty the futures ordered queue if the kill channel has received a message
-                                for _ in futures_ordered_kill_rx.try_iter() {
-                                    futures_ordered = FuturesOrdered::new();
-                                    kill_signal_sent = true;
-                                }
-
-                                if !kill_signal_sent {
-                                    // send tempfile to ai voice audio playing thread
-                                    ai_audio_playing_tx.send(tempfile).unwrap();
-                                }
+                                ai_audio_playing_tx.send(tempfile).unwrap();
                             }
                             None => {
                                 // play_audio(&failed_temp_file.path());
