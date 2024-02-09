@@ -305,30 +305,42 @@ pub mod speakstream {
                     .unwrap();
 
                 // Create the futures ordered queue Used to turn text into speech
-                let mut futures_ordered = FuturesOrdered::new();
+                let (mut converting_tx, converting_rx) = tokio::sync::mpsc::unbounded_channel();
+
+                let handle = runtime.handle();
+
+                handle.spawn(async {
+                    loop {
+                        // Queue up any text segments to be turned into speech.
+                        while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
+                            converting_tx.send(runtime.handle().spawn(turn_text_to_speech(
+                                ai_text,
+                                speech_speed,
+                                &thread_voice,
+                            )));
+                        }
+                    }
+                });
+
+                handle.spawn(async {
+                    // Empty the futures ordered queue if the kill channel has received a message
+                    while let Ok(_) = futures_ordered_kill_rx.recv_async().await {
+                        while let Ok(handle) = converting_rx.try_recv() {
+                            let _ = handle.abort();
+                        }
+                    }
+                });
 
                 loop {
-                    // Queue up any text segments to be turned into speech.
-                    for ai_text in thread_ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(
-                            ai_text,
-                            speech_speed,
-                            &thread_voice,
-                        ));
-                    }
-
-                    // Empty the futures ordered queue if the kill channel has received a message
-                    for _ in futures_ordered_kill_rx.try_iter() {
-                        futures_ordered = FuturesOrdered::new();
-                    }
-
                     // Send any ready audio segments to the ai voice audio playing thread
                     //
                     // If futures_ordered has no futures to work on, this loop will be skipped
                     // and not block. However if futures_ordered does have futures to work on,
                     // this loop will block until the first future in queue is ready.
                     // and outputed from the .next() call.
-                    while let Some(tempfile_option) = runtime.block_on(futures_ordered.next()) {
+                    while let Some(tempfile_option) =
+                        runtime.block_on(async { converting_rx.recv().await.unwrap().await })
+                    {
                         match tempfile_option {
                             Some(tempfile) => {
                                 let mut kill_signal_sent = false;
