@@ -310,6 +310,7 @@ pub mod speakstream {
                     tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
+                            // println!("{}", "thread_ai_tts_rx.recv_async()".purple());
                             let thread_voice = thread_voice.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
@@ -319,41 +320,50 @@ pub mod speakstream {
                                 .unwrap();
                             println!("{}", "converting_tx.send_async()".purple());
                         }
-                        println!("exited loop 1");
-                    });
-                }
-
-                {
-                    let converting_rx = converting_rx.clone();
-                    // let futures_ordered_kill_rx = futures_ordered_kill_rx.clone();
-                    tokio::spawn(async move {
-                        // Empty the futures ordered queue if the kill channel has received a message
-                        while let Ok(_) = futures_ordered_kill_rx.recv() {
-                            println!("{}", "Kill order received".purple());
-                            while let Ok(handle) = converting_rx.try_recv() {
-                                handle.abort();
-                                println!("{}", "handle.abort()".purple());
-                            }
-                            println!("{}", "exited while abort loop".purple());
-                        }
-                        println!("exited loop 2");
+                        // println!("exited loop 1");
                     });
                 }
 
                 loop {
-                    // Send any ready audio segments to the ai voice audio playing thread
-                    //
-                    // If futures_ordered has no futures to work on, this loop will be skipped
-                    // and not block. However if futures_ordered does have futures to work on,
-                    // this loop will block until the first future in queue is ready.
-                    // and outputed from the .next() call.
-                    while let Ok(handle) = converting_rx.recv_async().await.unwrap().await {
-                        println!("{}", "awaiting handle result".yellow());
+                    // tokio sleep is needed here because otherwise this green thread
+                    // takes up so much compute that other green threads never get to run.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+
+                    // Empty the futures ordered queue if the kill channel has received a message
+                    for _ in futures_ordered_kill_rx.try_iter() {
+                        // println!("{}", "Kill order received".purple());
+                        while let Ok(handle) = converting_rx.try_recv() {
+                            handle.abort();
+                            // println!("{}", "handle.abort()".purple());
+                        }
+                        // println!("{}", "exited while abort loop".purple());
+                    }
+
+                    while let Ok(handle) = converting_rx.try_recv() {
+                        let handle = handle.await.unwrap();
+                        // println!("{}", "awaiting handle result".yellow());
                         let tempfile_option = handle.await;
-                        println!("{}", "Sending handle result".red());
+                        // println!("{}", "Sending handle result".red());
                         match tempfile_option {
                             Some(tempfile) => {
-                                ai_audio_playing_tx.send(tempfile).unwrap();
+                                let mut kill_signal_sent = false;
+                                // Empty the futures ordered queue if the kill channel has received a message
+                                for _ in futures_ordered_kill_rx.try_iter() {
+                                    // println!("{}", "Kill order received".green());
+                                    while let Ok(handle) = converting_rx.try_recv() {
+                                        handle.abort();
+                                        // println!("{}", "handle.abort()".green());
+                                    }
+                                    // println!("{}", "exited while abort loop".green());
+                                    kill_signal_sent = true;
+                                }
+
+                                // println!("{}{}", "!kill_signal_sent: ".green(), !kill_signal_sent);
+                                if !kill_signal_sent {
+                                    // send tempfile to ai voice audio playing thread
+                                    ai_audio_playing_tx.send(tempfile).unwrap();
+                                    println!("{}", "ai_audio_playing_tx.send(tempfile)".yellow());
+                                }
                             }
                             None => {
                                 // play_audio(&failed_temp_file.path());
@@ -399,6 +409,7 @@ pub mod speakstream {
             let sentences = self.sentence_accumulator.add_token(token);
             for sentence in sentences {
                 self.ai_tts_tx.send(sentence).unwrap();
+                println!("{}", "self.ai_tts_tx.send(sentence)".blue());
             }
         }
 
@@ -406,6 +417,7 @@ pub mod speakstream {
             // Process the last sentence
             if let Some(sentence) = self.sentence_accumulator.complete_sentence() {
                 self.ai_tts_tx.send(sentence).unwrap();
+                println!("{}", "self.ai_tts_tx.send(sentence)".blue());
             }
         }
 
