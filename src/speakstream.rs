@@ -54,9 +54,6 @@ pub mod speakstream {
                 self.buffer.push(char);
 
                 if self.buffer.len() > 300 {
-                    // println!();
-                    // println!("Bad cut");
-                    // println!();
                     // Push the sentence to the sentences vector and clear the buffer
                     {
                         let sentence = self.buffer.trim();
@@ -72,9 +69,6 @@ pub mod speakstream {
                         .last()
                         .map_or(false, |c| c.is_whitespace())
                 {
-                    // println!();
-                    // println!("Good cut");
-                    // println!();
                     // Push the sentence to the sentences vector and clear the buffer
                     {
                         let sentence = self.buffer.trim();
@@ -95,9 +89,6 @@ pub mod speakstream {
                             .last()
                             .map_or(false, |c| c.is_whitespace())
                         {
-                            // println!();
-                            // println!("Perfect cut");
-                            // println!();
                             // Push the sentence to the sentences vector and clear the buffer
                             {
                                 let sentence = self.buffer.trim();
@@ -310,7 +301,6 @@ pub mod speakstream {
                     tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
-                            // println!("{}", "thread_ai_tts_rx.recv_async()".purple());
                             let thread_voice = thread_voice.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
@@ -318,9 +308,7 @@ pub mod speakstream {
                                 }))
                                 .await
                                 .unwrap();
-                            println!("{}", "converting_tx.send_async()".purple());
                         }
-                        // println!("exited loop 1");
                     });
                 }
 
@@ -331,38 +319,31 @@ pub mod speakstream {
 
                     // Empty the futures ordered queue if the kill channel has received a message
                     for _ in futures_ordered_kill_rx.try_iter() {
-                        // println!("{}", "Kill order received".purple());
                         while let Ok(handle) = converting_rx.try_recv() {
                             handle.abort();
-                            // println!("{}", "handle.abort()".purple());
                         }
-                        // println!("{}", "exited while abort loop".purple());
                     }
 
                     while let Ok(handle) = converting_rx.try_recv() {
                         let handle = handle.await.unwrap();
-                        // println!("{}", "awaiting handle result".yellow());
+
                         let tempfile_option = handle.await;
-                        // println!("{}", "Sending handle result".red());
+
                         match tempfile_option {
                             Some(tempfile) => {
                                 let mut kill_signal_sent = false;
                                 // Empty the futures ordered queue if the kill channel has received a message
                                 for _ in futures_ordered_kill_rx.try_iter() {
-                                    // println!("{}", "Kill order received".green());
                                     while let Ok(handle) = converting_rx.try_recv() {
                                         handle.abort();
-                                        // println!("{}", "handle.abort()".green());
                                     }
-                                    // println!("{}", "exited while abort loop".green());
+
                                     kill_signal_sent = true;
                                 }
 
-                                // println!("{}{}", "!kill_signal_sent: ".green(), !kill_signal_sent);
                                 if !kill_signal_sent {
                                     // send tempfile to ai voice audio playing thread
                                     ai_audio_playing_tx.send(tempfile).unwrap();
-                                    println!("{}", "ai_audio_playing_tx.send(tempfile)".yellow());
                                 }
                             }
                             None => {
@@ -378,8 +359,6 @@ pub mod speakstream {
             let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             tokio::spawn(async move {
-                // println!("Waiting for ai_voice_playing_rx");
-
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
@@ -409,7 +388,6 @@ pub mod speakstream {
             let sentences = self.sentence_accumulator.add_token(token);
             for sentence in sentences {
                 self.ai_tts_tx.send(sentence).unwrap();
-                println!("{}", "self.ai_tts_tx.send(sentence)".blue());
             }
         }
 
@@ -417,7 +395,6 @@ pub mod speakstream {
             // Process the last sentence
             if let Some(sentence) = self.sentence_accumulator.complete_sentence() {
                 self.ai_tts_tx.send(sentence).unwrap();
-                println!("{}", "self.ai_tts_tx.send(sentence)".blue());
             }
         }
 
