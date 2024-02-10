@@ -54,9 +54,6 @@ pub mod speakstream {
                 self.buffer.push(char);
 
                 if self.buffer.len() > 300 {
-                    // println!();
-                    // println!("Bad cut");
-                    // println!();
                     // Push the sentence to the sentences vector and clear the buffer
                     {
                         let sentence = self.buffer.trim();
@@ -72,9 +69,6 @@ pub mod speakstream {
                         .last()
                         .map_or(false, |c| c.is_whitespace())
                 {
-                    // println!();
-                    // println!("Good cut");
-                    // println!();
                     // Push the sentence to the sentences vector and clear the buffer
                     {
                         let sentence = self.buffer.trim();
@@ -95,9 +89,6 @@ pub mod speakstream {
                             .last()
                             .map_or(false, |c| c.is_whitespace())
                         {
-                            // println!();
-                            // println!("Perfect cut");
-                            // println!();
                             // Push the sentence to the sentences vector and clear the buffer
                             {
                                 let sentence = self.buffer.trim();
@@ -181,7 +172,7 @@ pub mod speakstream {
     async fn turn_text_to_speech(
         ai_text: String,
         speed: f32,
-        voice: &Voice,
+        voice: Voice,
     ) -> Option<NamedTempFile> {
         let client = Client::new();
 
@@ -299,42 +290,54 @@ pub mod speakstream {
             // the ai voice audio playing thread
             let thread_ai_tts_rx = ai_tts_rx.clone();
             let thread_voice = voice.clone();
-            thread::spawn(move || {
-                let runtime = tokio::runtime::Runtime::new()
-                    .context("Failed to create tokio runtime")
-                    .unwrap();
-
+            tokio::spawn(async move {
                 // Create the futures ordered queue Used to turn text into speech
-                let mut futures_ordered = FuturesOrdered::new();
+                // let (mut converting_tx, mut converting_rx) = tokio::sync::mpsc::unbounded_channel();
+                let (converting_tx, converting_rx) = flume::unbounded();
+
+                {
+                    let converting_tx = converting_tx.clone();
+                    let thread_voice = thread_voice.clone();
+                    tokio::spawn(async move {
+                        // Queue up any text segments to be turned into speech.
+                        while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
+                            let thread_voice = thread_voice.clone();
+                            converting_tx
+                                .send_async(tokio::spawn(async move {
+                                    turn_text_to_speech(ai_text, speech_speed, thread_voice)
+                                }))
+                                .await
+                                .unwrap();
+                        }
+                    });
+                }
 
                 loop {
-                    // Queue up any text segments to be turned into speech.
-                    for ai_text in thread_ai_tts_rx.try_iter() {
-                        futures_ordered.push_back(turn_text_to_speech(
-                            ai_text,
-                            speech_speed,
-                            &thread_voice,
-                        ));
-                    }
+                    // tokio sleep is needed here because otherwise this green thread
+                    // takes up so much compute that other green threads never get to run.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
 
                     // Empty the futures ordered queue if the kill channel has received a message
                     for _ in futures_ordered_kill_rx.try_iter() {
-                        futures_ordered = FuturesOrdered::new();
+                        while let Ok(handle) = converting_rx.try_recv() {
+                            handle.abort();
+                        }
                     }
 
-                    // Send any ready audio segments to the ai voice audio playing thread
-                    //
-                    // If futures_ordered has no futures to work on, this loop will be skipped
-                    // and not block. However if futures_ordered does have futures to work on,
-                    // this loop will block until the first future in queue is ready.
-                    // and outputed from the .next() call.
-                    while let Some(tempfile_option) = runtime.block_on(futures_ordered.next()) {
+                    while let Ok(handle) = converting_rx.try_recv() {
+                        let handle = handle.await.unwrap();
+
+                        let tempfile_option = handle.await;
+
                         match tempfile_option {
                             Some(tempfile) => {
                                 let mut kill_signal_sent = false;
                                 // Empty the futures ordered queue if the kill channel has received a message
                                 for _ in futures_ordered_kill_rx.try_iter() {
-                                    futures_ordered = FuturesOrdered::new();
+                                    while let Ok(handle) = converting_rx.try_recv() {
+                                        handle.abort();
+                                    }
+
                                     kill_signal_sent = true;
                                 }
 
@@ -356,8 +359,6 @@ pub mod speakstream {
             let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             tokio::spawn(async move {
-                // println!("Waiting for ai_voice_playing_rx");
-
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
