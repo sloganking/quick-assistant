@@ -1,14 +1,11 @@
 pub mod speakstream {
 
     use anyhow::Context;
-    use futures::stream::FuturesOrdered;
-    use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
     use rodio::OutputStream;
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Command;
     use std::sync::Arc;
-    use std::thread;
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     // use async_openai::{
@@ -337,7 +334,6 @@ pub mod speakstream {
                                     while let Ok(handle) = converting_rx.try_recv() {
                                         handle.abort();
                                     }
-
                                     kill_signal_sent = true;
                                 }
 
