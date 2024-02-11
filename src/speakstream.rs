@@ -263,6 +263,11 @@ pub mod speakstream {
 
     impl SpeakStream {
         pub fn new(voice: Voice, speech_speed: f32) -> (Self, OutputStream) {
+            // The maximum number of audio files that can be queued up to be played by the AI voice audio
+            // playing thread Limiting this number prevents converting too much text to speech at once and
+            // incurring large API costs for conversions that may not be used if speaking is stopped.
+            const AI_VOICE_SINK_BUFFER_SIZE: usize = 10;
+
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
                 flume::unbounded();
@@ -275,7 +280,7 @@ pub mod speakstream {
             let (ai_audio_playing_tx, ai_audio_playing_rx): (
                 flume::Sender<NamedTempFile>,
                 flume::Receiver<NamedTempFile>,
-            ) = flume::unbounded();
+            ) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
             let (futures_ordered_kill_tx, futures_ordered_kill_rx): (
                 flume::Sender<()>,
@@ -290,7 +295,7 @@ pub mod speakstream {
             tokio::spawn(async move {
                 // Create the futures ordered queue Used to turn text into speech
                 // let (mut converting_tx, mut converting_rx) = tokio::sync::mpsc::unbounded_channel();
-                let (converting_tx, converting_rx) = flume::unbounded();
+                let (converting_tx, converting_rx) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
                 {
                     let converting_tx = converting_tx.clone();
