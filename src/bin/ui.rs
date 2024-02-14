@@ -16,6 +16,7 @@ slint::slint! {
 
         VerticalLayout {
             width: 66%;
+            padding-bottom: 100px;
             // TextEdit {
 
             // }
@@ -64,12 +65,6 @@ slint::slint! {
                         }
                     }
                 }
-            }
-
-            Rectangle {
-                border-color: yellow;
-                width: 100px;
-                height: 100px;
             }
         }
     }
