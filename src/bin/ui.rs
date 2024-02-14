@@ -34,7 +34,6 @@ slint::slint! {
                         VerticalLayout {
                             alignment: end;
                             message_history_text := Text {
-                                text: "Hello World!";
                                 wrap: word-wrap;
                             }
                         }
