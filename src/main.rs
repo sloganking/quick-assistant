@@ -634,9 +634,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .build()
                             .unwrap();
 
-                        let mut stream = runtime
-                            .block_on(client.chat().create_stream(request))
-                            .unwrap();
+                        let mut stream = match runtime.block_on(future::timeout(
+                            Duration::from_secs(15),
+                            client.chat().create_stream(request),
+                        )) {
+                            Ok(stream) => match stream {
+                                Ok(stream) => stream,
+                                Err(err) => {
+                                    println_error(&format!("Failed to create stream: {}", err));
+
+                                    play_audio(failed_temp_file.path());
+
+                                    break 'request;
+                                }
+                            },
+                            Err(err) => {
+                                println_error(&format!(
+                                    "Failed to create stream due to timeout: {:?}",
+                                    err
+                                ));
+
+                                play_audio(failed_temp_file.path());
+
+                                break 'request;
+                            }
+                        };
 
                         while let Some(result) = {
                             match runtime
