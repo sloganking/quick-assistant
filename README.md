@@ -10,4 +10,4 @@ https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5
 
 ## Plans
 
-- Give the AI functions for controling the desktop. Such as volume, brightness, and locking the screen. Allowing it to be more helpful.
+- Give the AI functions for controling the desktop. Such as volume, brightness, and locking the screen. Allowing it to be more helpful. See issue [#16](https://github.com/sloganking/quick-assistant/issues/16)
