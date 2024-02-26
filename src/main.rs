@@ -676,7 +676,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {
-                                            "media_button": { "type": "string", "enum": ["MediaStop", "MediaNextTrack", "MediaPlayPause", "MediaPrevTrack"] },
+                                            "media_button": { "type": "string", "enum": ["MediaStop", "MediaNextTrack", "MediaPlayPause", "MediaPrevTrack", "VolumeUp", "VolumeDown", "VolumeMute"] },
                                         },
                                         "required": ["media_button"],
                                     }))
@@ -799,6 +799,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             "MediaPrevTrack" => {
                                                                 enigo.key_click(enigo::Key::MediaPrevTrack);
                                                                 enigo.key_click(enigo::Key::MediaPrevTrack);
+                                                            }
+                                                            "VolumeUp" => {
+                                                                for _ in 0..5 {
+                                                                    enigo.key_click(enigo::Key::VolumeUp);
+                                                                }
+                                                            }
+                                                            "VolumeDown" => {
+                                                                for _ in 0..5 {
+                                                                    enigo.key_click(enigo::Key::VolumeDown);
+                                                                }
+                                                            }
+                                                            "VolumeMute" => {
+                                                                enigo.key_click(enigo::Key::VolumeMute);
                                                             }
                                                             _ => {
                                                                 println!("Unknown media button: {}", media_button);
