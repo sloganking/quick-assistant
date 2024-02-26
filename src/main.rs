@@ -789,6 +789,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             .parse::<u32>()
                                                             .unwrap();
 
+                                                        println!("{}{}","set_screen_brightness: ".purple(), brightness);
+
                                                         set_screen_brightness(brightness).unwrap();
                                                     },
                                                     "media_controls" => {
@@ -797,6 +799,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         let media_button = args["media_button"]
                                                             .as_str()
                                                             .unwrap();
+
+                                                        println!("{}{}","media_controls: ".purple(), media_button);
 
                                                         match media_button {
                                                             "MediaStop" => {
@@ -837,6 +841,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         let application = args["application"]
                                                             .as_str()
                                                             .unwrap();
+
+                                                        println!("{}{}","opening application: ".purple(), application);
 
                                                         enigo.key_click(enigo::Key::Meta);
                                                         std::thread::sleep(std::time::Duration::from_millis(500));
