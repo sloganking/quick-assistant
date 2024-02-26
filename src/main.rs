@@ -680,6 +680,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         },
                                         "required": ["media_button"],
                                     }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("open_application")
+                                    .description("naively opens an applicatin by pressing the super key to open system search and then types the name of the application and presses enter.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "application": { "type": "string" },
+                                        },
+                                        "required": ["application"],
+                                    }))
                                     .build().unwrap()
                             ])
                             .build()
@@ -817,6 +829,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                 println!("Unknown media button: {}", media_button);
                                                             }
                                                         }
+                                                    }
+
+                                                    "open_application" => {
+                                                        let args: serde_json::Value =
+                                                            serde_json::from_str(&fn_args).unwrap();
+                                                        let application = args["application"]
+                                                            .as_str()
+                                                            .unwrap();
+
+                                                        enigo.key_click(enigo::Key::Meta);
+                                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                                        enigo.key_sequence(&application);
+                                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                                        enigo.key_click(enigo::Key::Return);
                                                     }
                                                     _ => {
                                                         println!("Unknown function: {}", fn_name);
