@@ -37,6 +37,7 @@ use std::error::Error;
 use std::time::Duration;
 use uuid::Uuid;
 mod speakstream;
+use enigo::{Enigo, KeyboardControllable, MouseControllable};
 use speakstream::speakstream as ss;
 
 #[derive(Parser, Debug)]
@@ -368,6 +369,8 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let mut enigo = Enigo::new();
+
     let opt = Opt::parse();
     let _ = dotenv();
 
@@ -651,20 +654,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .model("gpt-4-1106-preview")
                             .max_tokens(512u16)
                             .messages(message_history.clone())
-                            .functions([ChatCompletionFunctionsArgs::default()
-                                .name("set_screen_brightness")
-                                .description("Sets the brightness of the device's screen.")
-                                .parameters(json!({
-                                    "type": "object",
-                                    "properties": {
-                                        "brightness": {
-                                            "type": "string",
-                                            "description": "The brightness of the screen. A number between 0 and 100.",
+                            .functions([
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("set_screen_brightness")
+                                    .description("Sets the brightness of the device's screen.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "brightness": {
+                                                "type": "string",
+                                                "description": "The brightness of the screen. A number between 0 and 100.",
+                                            },
                                         },
-                                    },
-                                    "required": ["brightness"],
-                                }))
-                                .build().unwrap()])
+                                        "required": ["brightness"],
+                                    }))
+                                    .build().unwrap(),
+                                    
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("media_controls")
+                                    .description("Plays/Pauses/Seeks media.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "media_button": { "type": "string", "enum": ["MediaStop", "MediaNextTrack", "MediaPlayPause", "MediaPrevTrack"] },
+                                        },
+                                        "required": ["media_button"],
+                                    }))
+                                    .build().unwrap()
+                            ])
                             .build()
                             .unwrap();
 
@@ -761,6 +778,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             .unwrap();
 
                                                         set_screen_brightness(brightness).unwrap();
+                                                    },
+                                                    "media_controls" => {
+                                                        let args: serde_json::Value =
+                                                            serde_json::from_str(&fn_args).unwrap();
+                                                        let media_button = args["media_button"]
+                                                            .as_str()
+                                                            .unwrap();
+
+                                                        match media_button {
+                                                            "MediaStop" => {
+                                                                enigo.key_click(enigo::Key::MediaStop);
+                                                            }
+                                                            "MediaNextTrack" => {
+                                                                enigo.key_click(enigo::Key::MediaNextTrack);
+                                                            }
+                                                            "MediaPlayPause" => {
+                                                                enigo.key_click(enigo::Key::MediaPlayPause);
+                                                            }
+                                                            "MediaPrevTrack" => {
+                                                                enigo.key_click(enigo::Key::MediaPrevTrack);
+                                                                enigo.key_click(enigo::Key::MediaPrevTrack);
+                                                            }
+                                                            _ => {
+                                                                println!("Unknown media button: {}", media_button);
+                                                            }
+                                                        }
                                                     }
                                                     _ => {
                                                         println!("Unknown function: {}", fn_name);
