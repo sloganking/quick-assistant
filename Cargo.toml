@@ -26,3 +26,4 @@ chrono = "0.4.31"
 uuid = { version = "1.6.1", features = ["v4"] }
 slint = "1.4.1"
 slint-build = "1.4.1"
+serde_json = "1.0.114"

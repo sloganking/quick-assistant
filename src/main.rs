@@ -1,9 +1,16 @@
 use anyhow::Context;
+use async_openai::config::OpenAIConfig;
+use async_openai::types::{
+    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
+};
 use dotenvy::dotenv;
+use serde_json::json;
+use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
 mod transcribe;
@@ -346,6 +353,19 @@ fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
     temp_file
 }
 
+fn set_screen_brightness(brightness: u32) -> Option<()> {
+    if brightness > 100 {
+        println!("Brightness must be between 0 and 100");
+        return None;
+    }
+
+    Command::new("luster")
+        .arg(brightness.to_string())
+        .output()
+        .ok()
+        .map(|_| ())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
@@ -631,6 +651,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .model("gpt-4-1106-preview")
                             .max_tokens(512u16)
                             .messages(message_history.clone())
+                            .functions([ChatCompletionFunctionsArgs::default()
+                                .name("set_screen_brightness")
+                                .description("Sets the brightness of the device's screen.")
+                                .parameters(json!({
+                                    "type": "object",
+                                    "properties": {
+                                        "brightness": {
+                                            "type": "string",
+                                            "description": "The brightness of the screen. A number between 0 and 100.",
+                                        },
+                                    },
+                                    "required": ["brightness"],
+                                }))
+                                .build().unwrap()])
                             .build()
                             .unwrap();
 
@@ -659,6 +693,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 break 'request;
                             }
                         };
+
+                        let mut fn_name = String::new();
+                        let mut fn_args = String::new();
 
                         while let Some(result) = {
                             match runtime
@@ -700,8 +737,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                             match result {
                                 Ok(response) => {
-                                    response.choices.iter().for_each(|chat_choice| {
-                                        if let Some(ref content) = chat_choice.delta.content {
+                                    for chat_choice in response.choices {
+                                        if let Some(fn_call) = &chat_choice.delta.function_call {
+                                            if let Some(name) = &fn_call.name {
+                                                fn_name = name.clone();
+                                            }
+                                            if let Some(args) = &fn_call.arguments {
+                                                fn_args.push_str(args);
+                                            }
+                                        }
+                                        if let Some(finish_reason) = &chat_choice.finish_reason {
+                                            if matches!(finish_reason, FinishReason::FunctionCall) {
+                                                // call_fn(&client, &fn_name, &fn_args).await?;
+
+                                                match fn_name.as_str() {
+                                                    "set_screen_brightness" => {
+                                                        let args: serde_json::Value =
+                                                            serde_json::from_str(&fn_args).unwrap();
+                                                        let brightness = args["brightness"]
+                                                            .as_str()
+                                                            .unwrap()
+                                                            .parse::<u32>()
+                                                            .unwrap();
+
+                                                        set_screen_brightness(brightness).unwrap();
+                                                    }
+                                                    _ => {
+                                                        println!("Unknown function: {}", fn_name);
+                                                    }
+                                                }
+                                            }
+                                        } else if let Some(content) = &chat_choice.delta.content {
                                             if !displayed_ai_label {
                                                 println!("{}", "AI: ".truecolor(0, 0, 255));
                                                 displayed_ai_label = true;
@@ -715,7 +781,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             thread_speak_stream.add_token(content);
                                             drop(thread_speak_stream);
                                         }
-                                    });
+                                    }
                                 }
                                 Err(_err) => {
                                     println!("error: {_err}");
@@ -738,7 +804,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         message_history.push(
                             ChatCompletionRequestAssistantMessageArgs::default()
                                 .content(&ai_content)
-                                // .role(Role::Assistant)
                                 .build()
                                 .unwrap()
                                 .into(),
