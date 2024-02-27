@@ -378,7 +378,6 @@ pub mod speakstream {
                     if default_device.name().ok() != default_device_name {
                         default_device_name = default_device.name().ok();
 
-                        //orange
                         println!(
                             "{}{:?}",
                             "Default output device changed to: ".truecolor(255, 165, 0),
@@ -390,8 +389,25 @@ pub mod speakstream {
                     thread_ai_voice_sink.stop();
                     thread_ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
+                    use futures::{future::FutureExt, select};
+                    use tokio::task;
 
-                    thread_ai_voice_sink.sleep_until_end();
+                    let blocking_task = {
+                        let thread_ai_voice_sink = thread_ai_voice_sink.clone();
+                        let handle = task::spawn_blocking(move || {
+                            // Your blocking operation here
+                            thread_ai_voice_sink.sleep_until_end()
+                        });
+                        handle
+                    };
+
+                    select! {
+                        _ = blocking_task.fuse() => {},
+                        _ = tokio::time::sleep(Duration::from_secs(1)).fuse() => {
+                            println_error("AI voice audio playing thread timed out");
+                        }
+
+                    };
                 }
             });
 
