@@ -765,6 +765,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             match result {
                                 Ok(response) => {
                                     for chat_choice in response.choices {
+                                        #[allow(deprecated)]
                                         if let Some(fn_call) = &chat_choice.delta.function_call {
                                             if let Some(name) = &fn_call.name {
                                                 fn_name = name.clone();

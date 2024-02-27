@@ -378,7 +378,7 @@ pub mod speakstream {
                     .name()
                     .ok();
 
-                let (mut stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
+                let (mut _stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
                 let mut ai_voice_sink = Arc::new(ai_voice_sink);
 
@@ -395,7 +395,7 @@ pub mod speakstream {
 
                         // put them in the persistent vars
                         ai_voice_sink = Arc::new(new_ai_voice_sink);
-                        stream = new_stream;
+                        _stream = new_stream;
 
                         // println!(
                         //     "{}{:?}",
@@ -415,7 +415,7 @@ pub mod speakstream {
                     runtime.block_on(async {
                         let blocking_task = {
                             let ai_voice_sink = ai_voice_sink.clone();
-                            
+
                             task::spawn_blocking(move || {
                                 // Your blocking operation here
                                 ai_voice_sink.sleep_until_end()
