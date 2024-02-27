@@ -389,7 +389,7 @@ pub mod speakstream {
                         default_device_name = default_device.name().ok();
 
                         // create new stream and sink
-                        let (new_stream, _stream_handle) =
+                        let (new_stream, stream_handle) =
                             rodio::OutputStream::try_default().unwrap();
                         let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
