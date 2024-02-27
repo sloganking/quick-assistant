@@ -397,11 +397,11 @@ pub mod speakstream {
                         ai_voice_sink = Arc::new(new_ai_voice_sink);
                         stream = new_stream;
 
-                        println!(
-                            "{}{:?}",
-                            "Default output device changed to: ".truecolor(255, 165, 0),
-                            default_device_name
-                        );
+                        // println!(
+                        //     "{}{:?}",
+                        //     "Default output device changed to: ".truecolor(255, 165, 0),
+                        //     default_device_name
+                        // );
                     }
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
