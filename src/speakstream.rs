@@ -2,14 +2,17 @@ pub mod speakstream {
 
     use anyhow::Context;
     use cpal::traits::HostTrait;
+    use futures::{future::FutureExt, select};
     use rodio::DeviceTrait;
     use rodio::OutputStream;
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Command;
     use std::sync::Arc;
+    use std::thread;
     use tempfile::Builder;
     use tempfile::NamedTempFile;
+    use tokio::task;
     // use async_openai::{
     //     types::{
     //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -364,14 +367,18 @@ pub mod speakstream {
             // Create the ai voice audio playing thread
             // let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
-            tokio::spawn(async move {
+            thread::spawn(move || {
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime")
+                    .unwrap();
+
                 let mut default_device_name = cpal::default_host()
                     .default_output_device()
                     .unwrap()
                     .name()
                     .ok();
 
-                let (mut _stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
+                let (mut stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
                 let mut ai_voice_sink = Arc::new(ai_voice_sink);
 
@@ -382,13 +389,13 @@ pub mod speakstream {
                         default_device_name = default_device.name().ok();
 
                         // create new stream and sink
-                        let (mut new_stream, _stream_handle) =
+                        let (new_stream, _stream_handle) =
                             rodio::OutputStream::try_default().unwrap();
                         let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
                         // put them in the persistent vars
                         ai_voice_sink = Arc::new(new_ai_voice_sink);
-                        let _stream = new_stream;
+                        stream = new_stream;
 
                         println!(
                             "{}{:?}",
@@ -401,29 +408,30 @@ pub mod speakstream {
                     ai_voice_sink.stop();
                     ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
-                    use futures::{future::FutureExt, select};
-                    use tokio::task;
 
-                    let blocking_task = {
-                        let ai_voice_sink = ai_voice_sink.clone();
-                        let handle = task::spawn_blocking(move || {
-                            // Your blocking operation here
-                            ai_voice_sink.sleep_until_end()
-                        });
-                        handle
-                    };
+                    while let Ok(_) = stop_speech_rx.try_recv() {}
 
-                    select! {
-                        _ = blocking_task.fuse() => {},
-                        _ = stop_speech_rx.recv_async() => {
+                    // ai_voice_sink.stop();
+                    runtime.block_on(async {
+                        let blocking_task = {
+                            let ai_voice_sink = ai_voice_sink.clone();
+                            let handle = task::spawn_blocking(move || {
+                                // Your blocking operation here
+                                ai_voice_sink.sleep_until_end()
+                            });
+                            handle
+                        };
 
-                            // empty the stop_speech_rx channel.
-                            while let Ok(_) = stop_speech_rx.try_recv(){}
+                        select! {
+                            _ = blocking_task.fuse() => {},
+                            _ = stop_speech_rx.recv_async() => {
 
-                            ai_voice_sink.stop();
-                        }
-
-                    };
+                                // empty the stop_speech_rx channel.
+                                while let Ok(_) = stop_speech_rx.try_recv(){}
+                                ai_voice_sink.stop();
+                            }
+                        };
+                    });
                 }
             });
 
