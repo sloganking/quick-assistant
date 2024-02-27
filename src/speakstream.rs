@@ -283,7 +283,7 @@ pub mod speakstream {
             // Create the AI voice audio sink
             let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
             let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
-            let ai_voice_sink = Arc::new(ai_voice_sink);
+            let _ai_voice_sink = Arc::new(ai_voice_sink);
 
             let (ai_audio_playing_tx, ai_audio_playing_rx): (
                 flume::Sender<NamedTempFile>,
@@ -409,17 +409,17 @@ pub mod speakstream {
                     ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
 
-                    while let Ok(_) = stop_speech_rx.try_recv() {}
+                    while stop_speech_rx.try_recv().is_ok() {}
 
                     // ai_voice_sink.stop();
                     runtime.block_on(async {
                         let blocking_task = {
                             let ai_voice_sink = ai_voice_sink.clone();
-                            let handle = task::spawn_blocking(move || {
+                            
+                            task::spawn_blocking(move || {
                                 // Your blocking operation here
                                 ai_voice_sink.sleep_until_end()
-                            });
-                            handle
+                            })
                         };
 
                         select! {
@@ -427,7 +427,7 @@ pub mod speakstream {
                             _ = stop_speech_rx.recv_async() => {
 
                                 // empty the stop_speech_rx channel.
-                                while let Ok(_) = stop_speech_rx.try_recv(){}
+                                while stop_speech_rx.try_recv().is_ok(){}
                                 ai_voice_sink.stop();
                             }
                         };

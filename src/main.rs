@@ -1,11 +1,9 @@
 use anyhow::Context;
-use async_openai::config::OpenAIConfig;
 use async_openai::types::{
-    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
+    ChatCompletionFunctionsArgs, FinishReason,
 };
 use dotenvy::dotenv;
 use serde_json::json;
-use std::collections::HashMap;
 use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
@@ -37,7 +35,7 @@ use std::error::Error;
 use std::time::Duration;
 use uuid::Uuid;
 mod speakstream;
-use enigo::{Enigo, KeyboardControllable, MouseControllable};
+use enigo::{Enigo, KeyboardControllable};
 use speakstream::speakstream as ss;
 
 #[derive(Parser, Debug)]
@@ -846,7 +844,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                                         enigo.key_click(enigo::Key::Meta);
                                                         std::thread::sleep(std::time::Duration::from_millis(500));
-                                                        enigo.key_sequence(&application);
+                                                        enigo.key_sequence(application);
                                                         std::thread::sleep(std::time::Duration::from_millis(500));
                                                         enigo.key_click(enigo::Key::Return);
                                                     }
