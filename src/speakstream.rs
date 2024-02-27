@@ -259,7 +259,7 @@ pub mod speakstream {
         ai_tts_tx: flume::Sender<String>,
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
-        ai_voice_sink: Arc<rodio::Sink>,
+        stop_speech_tx: flume::Sender<()>,
         ai_audio_playing_rx: flume::Receiver<NamedTempFile>,
     }
 
@@ -272,6 +272,9 @@ pub mod speakstream {
 
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
+                flume::unbounded();
+
+            let (stop_speech_tx, stop_speech_rx): (flume::Sender<()>, flume::Receiver<()>) =
                 flume::unbounded();
 
             // Create the AI voice audio sink
@@ -359,7 +362,7 @@ pub mod speakstream {
             });
 
             // Create the ai voice audio playing thread
-            let thread_ai_voice_sink = ai_voice_sink.clone();
+            // let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             tokio::spawn(async move {
                 let mut default_device_name = cpal::default_host()
@@ -368,15 +371,24 @@ pub mod speakstream {
                     .name()
                     .ok();
 
-                // let (_stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
-                // let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
-                // let ai_voice_sink = Arc::new(ai_voice_sink);
+                let (mut _stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
+                let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
+                let mut ai_voice_sink = Arc::new(ai_voice_sink);
 
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
                     // if the default device has changed, update the sink
                     let default_device = cpal::default_host().default_output_device().unwrap();
                     if default_device.name().ok() != default_device_name {
                         default_device_name = default_device.name().ok();
+
+                        // create new stream and sink
+                        let (mut new_stream, _stream_handle) =
+                            rodio::OutputStream::try_default().unwrap();
+                        let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
+
+                        // put them in the persistent vars
+                        ai_voice_sink = Arc::new(new_ai_voice_sink);
+                        let _stream = new_stream;
 
                         println!(
                             "{}{:?}",
@@ -386,25 +398,29 @@ pub mod speakstream {
                     }
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
-                    thread_ai_voice_sink.stop();
-                    thread_ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    ai_voice_sink.stop();
+                    ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
                     use futures::{future::FutureExt, select};
                     use tokio::task;
 
                     let blocking_task = {
-                        let thread_ai_voice_sink = thread_ai_voice_sink.clone();
+                        let ai_voice_sink = ai_voice_sink.clone();
                         let handle = task::spawn_blocking(move || {
                             // Your blocking operation here
-                            thread_ai_voice_sink.sleep_until_end()
+                            ai_voice_sink.sleep_until_end()
                         });
                         handle
                     };
 
                     select! {
                         _ = blocking_task.fuse() => {},
-                        _ = tokio::time::sleep(Duration::from_secs(1)).fuse() => {
-                            println_error("AI voice audio playing thread timed out");
+                        _ = stop_speech_rx.recv_async() => {
+
+                            // empty the stop_speech_rx channel.
+                            while let Ok(_) = stop_speech_rx.try_recv(){}
+
+                            ai_voice_sink.stop();
                         }
 
                     };
@@ -417,7 +433,7 @@ pub mod speakstream {
                     ai_tts_tx,
                     ai_tts_rx,
                     futures_ordered_kill_tx,
-                    ai_voice_sink,
+                    stop_speech_tx,
                     ai_audio_playing_rx,
                 },
                 _stream,
@@ -455,7 +471,7 @@ pub mod speakstream {
             for _ in self.ai_audio_playing_rx.try_iter() {}
 
             // stop the AI voice from speaking the current sentence
-            self.ai_voice_sink.stop();
+            self.stop_speech_tx.send(()).unwrap();
         }
     }
 }
