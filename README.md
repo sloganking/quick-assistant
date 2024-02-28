@@ -8,6 +8,6 @@ A push-to-talk AI voice assistant for your desktop.
 https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5-9ee9-dd9f9d56ea95
 
 
-## Plans
+## Features
 
-- Give the AI functions for controling the desktop. Such as volume, brightness, and locking the screen. Allowing it to be more helpful. See issue [#16](https://github.com/sloganking/quick-assistant/issues/16)
+- The assistant has functions for controling the desktop. Such as adjusting volume, brightness, media control, and applicatin launching.
