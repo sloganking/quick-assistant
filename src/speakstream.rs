@@ -385,24 +385,23 @@ pub mod speakstream {
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
                     // if the default device has changed, update the sink
                     let default_device = cpal::default_host().default_output_device().unwrap();
-                    if default_device.name().ok() != default_device_name {
-                        default_device_name = default_device.name().ok();
+                    // if default_device.name().ok() != default_device_name {
+                    // default_device_name = default_device.name().ok();
 
-                        // create new stream and sink
-                        let (new_stream, stream_handle) =
-                            rodio::OutputStream::try_default().unwrap();
-                        let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
+                    // create new stream and sink
+                    let (new_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+                    let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
-                        // put them in the persistent vars
-                        ai_voice_sink = Arc::new(new_ai_voice_sink);
-                        _stream = new_stream;
+                    // put them in the persistent vars
+                    ai_voice_sink = Arc::new(new_ai_voice_sink);
+                    _stream = new_stream;
 
-                        // println!(
-                        //     "{}{:?}",
-                        //     "Default output device changed to: ".truecolor(255, 165, 0),
-                        //     default_device_name
-                        // );
-                    }
+                    // println!(
+                    //     "{}{:?}",
+                    //     "Default output device changed to: ".truecolor(255, 165, 0),
+                    //     default_device_name
+                    // );
+                    // }
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
@@ -425,9 +424,9 @@ pub mod speakstream {
                         select! {
                             _ = blocking_task.fuse() => {},
                             _ = stop_speech_rx.recv_async() => {
-
                                 // empty the stop_speech_rx channel.
                                 while stop_speech_rx.try_recv().is_ok(){}
+
                                 ai_voice_sink.stop();
                             }
                         };
