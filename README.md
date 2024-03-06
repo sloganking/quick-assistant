@@ -10,4 +10,4 @@ https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5
 
 ## Features
 
-- The assistant has functions for controling the desktop. Such as adjusting volume, brightness, media control, and applicatin launching.
+- The assistant has functions for controling the desktop. Such as adjusting volume, brightness, media control, and application launching.
