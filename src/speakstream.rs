@@ -13,6 +13,10 @@ pub mod speakstream {
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     use tokio::task;
+    use tracing::info;
+    use tracing::instrument;
+    use tracing::span;
+    use tracing::Level;
     // use async_openai::{
     //     types::{
     //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -127,6 +131,7 @@ pub mod speakstream {
     }
 
     /// Speeds up an audio file by a factor of `speed`.
+    #[instrument]
     fn adjust_audio_file_speed(input: &Path, output: &Path, speed: f32) {
         // ffmpeg -y -i input.mp3 -filter:a "atempo={speed}" -vn output.mp3
         match Command::new("ffmpeg")
@@ -171,6 +176,7 @@ pub mod speakstream {
     }
 
     /// Turns text into speech using the AI voice.
+    #[instrument]
     async fn turn_text_to_speech(
         ai_text: String,
         speed: f32,
@@ -267,6 +273,7 @@ pub mod speakstream {
     }
 
     impl SpeakStream {
+        #[instrument]
         pub fn new(voice: Voice, speech_speed: f32) -> (Self, OutputStream) {
             // The maximum number of audio files that can be queued up to be played by the AI voice audio
             // playing thread Limiting this number prevents converting too much text to speech at once and
@@ -301,34 +308,46 @@ pub mod speakstream {
             let thread_ai_tts_rx = ai_tts_rx.clone();
             let thread_voice = voice.clone();
             tokio::spawn(async move {
-                // Create the futures ordered queue Used to turn text into speech
-                // let (mut converting_tx, mut converting_rx) = tokio::sync::mpsc::unbounded_channel();
                 let (converting_tx, converting_rx) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
                 {
                     let converting_tx = converting_tx.clone();
                     let thread_voice = thread_voice.clone();
                     tokio::spawn(async move {
+                        let span = span!(Level::ERROR, "tts_conversion_thread");
+                        let _enter = span.enter();
+
+                        info!("tts_conversion_thread started");
+
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
                             let thread_voice = thread_voice.clone();
+                            let text_being_converted = ai_text.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
                                     turn_text_to_speech(ai_text, speech_speed, thread_voice)
                                 }))
                                 .await
                                 .unwrap();
+                            info!(
+                                "sent text segment to tts conversion thread: \"{}\"",
+                                text_being_converted
+                            );
                         }
                     });
                 }
+
+                let span = span!(Level::ERROR, "tts_conversion_awaiting_thread");
+                let _enter = span.enter();
 
                 loop {
                     // tokio sleep is needed here because otherwise this green thread
                     // takes up so much compute that other green threads never get to run.
                     tokio::time::sleep(Duration::from_millis(100)).await;
 
-                    // Empty the futures ordered queue if the kill channel has received a message
+                    // Cancel the tts conversions if the kill channel has received a message
                     for _ in futures_ordered_kill_rx.try_iter() {
+                        info!("killing tts conversions");
                         while let Ok(handle) = converting_rx.try_recv() {
                             handle.abort();
                         }
@@ -342,8 +361,9 @@ pub mod speakstream {
                         match tempfile_option {
                             Some(tempfile) => {
                                 let mut kill_signal_sent = false;
-                                // Empty the futures ordered queue if the kill channel has received a message
+                                // Cancel the tts conversions if the kill channel has received a message
                                 for _ in futures_ordered_kill_rx.try_iter() {
+                                    info!("killing tts conversions (inner)");
                                     while let Ok(handle) = converting_rx.try_recv() {
                                         handle.abort();
                                     }
@@ -353,6 +373,7 @@ pub mod speakstream {
                                 if !kill_signal_sent {
                                     // send tempfile to ai voice audio playing thread
                                     ai_audio_playing_tx.send(tempfile).unwrap();
+                                    info!("sent tempfile to ai voice audio playing thread");
                                 }
                             }
                             None => {
@@ -368,6 +389,9 @@ pub mod speakstream {
             // let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             thread::spawn(move || {
+                let span = span!(Level::ERROR, "ai_voice_audio_playing_thread");
+                let _enter = span.enter();
+
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
@@ -383,6 +407,8 @@ pub mod speakstream {
                 let mut ai_voice_sink = Arc::new(ai_voice_sink);
 
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
+                    info!("Received ai speech segment to play");
+
                     // if the default device has changed, update the sink
                     let default_device = cpal::default_host().default_output_device().unwrap();
                     // if default_device.name().ok() != default_device_name {
@@ -406,6 +432,7 @@ pub mod speakstream {
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
                     ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    info!("Started playing ai speech segment");
                     // sink.play();
 
                     while stop_speech_rx.try_recv().is_ok() {}
@@ -421,13 +448,17 @@ pub mod speakstream {
                             })
                         };
 
+                        info!("Waiting for ai speech segment to finish playing");
                         select! {
-                            _ = blocking_task.fuse() => {},
+                            _ = blocking_task.fuse() => {
+                                info!("Finished playing ai speech segment");
+                            },
                             _ = stop_speech_rx.recv_async() => {
                                 // empty the stop_speech_rx channel.
                                 while stop_speech_rx.try_recv().is_ok(){}
 
                                 ai_voice_sink.stop();
+                                info!("ai speech segment playback canceled");
                             }
                         };
                     });
