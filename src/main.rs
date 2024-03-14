@@ -4,7 +4,7 @@ use async_openai::types::{
 };
 use dotenvy::dotenv;
 use serde_json::json;
-use tracing::{error, info};
+use tracing::{error, info, instrument, span, Level};
 use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
@@ -493,6 +493,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             let thread_speak_stream_mutex = speak_stream_mutex.clone();
             thread::spawn(move || {
+                let span = span!(Level::ERROR, "audio_recorder_thread");
+                let _enter = span.enter();
+
+                info!("Starting audio recorder thread");
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
                 let mut key_pressed = false;
@@ -505,6 +509,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && !key_pressed {
                                 key_pressed = true;
                                 // handle key press
+                                info!("Push to talk key pressed");
 
                                 // stop the AI voice from speaking
                                 {
@@ -526,7 +531,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
-                                    Ok(_) => (),
+                                    Ok(_) => info!("Recording started"),
                                     Err(err) => println_error(&format!(
                                         "Failed to start recording: {:?}",
                                         err
@@ -538,6 +543,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && key_pressed {
                                 key_pressed = false;
                                 // handle key release
+                                info!("Push to talk key released");
 
                                 // get elapsed time since recording started
                                 let elapsed = match recording_start.elapsed() {
@@ -561,6 +567,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         continue;
                                     }
                                 }
+                                info!("Recording stopped");
 
                                 // Whisper API can't handle less than 0.1 seconds of audio.
                                 // So we'll only transcribe if the recording is longer than 0.2 seconds.
@@ -571,6 +578,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 if let Some(voice_tmp_path) = voice_tmp_path_option.take() {
                                     recording_tx.send(voice_tmp_path.clone()).unwrap();
+                                    info!("Recording sent to AI thread");
                                 }
                             }
                         }
@@ -585,6 +593,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             let thread_speak_stream_mutex = speak_stream_mutex.clone();
             thread::spawn(move || {
+                let span = span!(Level::ERROR, "ai_thread");
+                let _enter = span.enter();
+
+                info!("Starting AI thread");
                 let client = Client::new();
                 let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
 
@@ -595,16 +607,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .unwrap()
                         .into(),
                 );
+                info!("Added system message to message history");
 
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
 
                 for audio_path in recording_rx.iter() {
+                    info!("Received audio from audio recorder thread: {:?}", audio_path);
                     let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
                     thread_speak_stream.stop_speech();
                     drop(thread_speak_stream);
 
+                    info!("Transcribing audio");
                     let transcription_result = match runtime.block_on(future::timeout(
                         Duration::from_secs(10),
                         transcribe::transcribe(&client, &audio_path),
@@ -654,6 +669,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .unwrap()
                             .into(),
                     );
+                    info!("Added user message to message history");
 
                     // Make sure the LLM token generation is allowed to start
                     // It should only be stopped when the LLM is running.
@@ -743,6 +759,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut fn_name = String::new();
                         let mut fn_args = String::new();
 
+                        info!("Generating AI response");
                         while let Some(result) = {
                             match runtime
                                 .block_on(future::timeout(Duration::from_secs(15), stream.next()))
@@ -769,11 +786,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 message_history.push(
                                     ChatCompletionRequestAssistantMessageArgs::default()
                                         .content(&ai_content)
-                                        // .role(Role::Assistant)
                                         .build()
                                         .unwrap()
                                         .into(),
                                 );
+                                info!("Added unfinished AI message to message history");
 
                                 println!();
 
@@ -914,6 +931,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 .unwrap()
                                 .into(),
                         );
+                        info!("Added AI message to message history");
                         break;
                     }
 
@@ -946,6 +964,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     key_handler_tx.send(event).unwrap();
                 };
 
+                info!("Starting rdev key listener");
                 // This will block.
                 if let Err(error) = listen(callback) {
                     println_error(&format!("Failed to listen to key presses: {:?}", error));
