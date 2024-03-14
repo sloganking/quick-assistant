@@ -4,6 +4,7 @@ use async_openai::types::{
 };
 use dotenvy::dotenv;
 use serde_json::json;
+use tracing::{error, info};
 use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
@@ -16,6 +17,7 @@ use chrono::Local;
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
+use tracing_appender::rolling::{RollingFileAppender,Rotation};
 mod record;
 use async_openai::{
     types::{
@@ -367,6 +369,23 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
+    let file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_suffix("myapp.log") // log files will have names like "2019-01-01.myapp.log"
+        // ...
+        .build("./logs/")
+        .expect("failed to initialize rolling file appender");
+
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+   tracing_subscriber::fmt()
+       .with_writer(non_blocking)
+       .init();
+
+    info!("Starting up");
+
+
     let mut enigo = Enigo::new();
 
     let opt = Opt::parse();
