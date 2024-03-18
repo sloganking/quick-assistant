@@ -20,3 +20,5 @@ Cargo.lock
 
 .env
 *.mp3
+
+logs/
