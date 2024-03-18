@@ -1,6 +1,6 @@
 use anyhow::Context;
 use async_openai::types::{
-    ChatCompletionFunctionsArgs, FinishReason,
+    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason
 };
 use dotenvy::dotenv;
 use serde_json::json;
@@ -778,7 +778,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             if matches!(finish_reason, FinishReason::FunctionCall) {
                                                 // call_fn(&client, &fn_name, &fn_args).await?;
 
-                                                match fn_name.as_str() {
+                                                let func_response = match fn_name.as_str() {
                                                     "set_screen_brightness" => {
                                                         let args: serde_json::Value =
                                                             serde_json::from_str(&fn_args).unwrap();
@@ -790,7 +790,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                                         println!("{}{}","set_screen_brightness: ".purple(), brightness);
 
-                                                        set_screen_brightness(brightness).unwrap();
+                                                        if set_screen_brightness(brightness).is_some(){
+                                                            Some("Brightness set")
+                                                        } else {
+                                                            Some("Failed to set brightness")
+                                                        }
                                                     },
                                                     "media_controls" => {
                                                         let args: serde_json::Value =
@@ -832,6 +836,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                 println!("Unknown media button: {}", media_button);
                                                             }
                                                         }
+
+                                                        None
                                                     }
 
                                                     "open_application" => {
@@ -848,10 +854,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         enigo.key_sequence(application);
                                                         std::thread::sleep(std::time::Duration::from_millis(500));
                                                         enigo.key_click(enigo::Key::Return);
+
+                                                        None
                                                     }
                                                     _ => {
                                                         println!("Unknown function: {}", fn_name);
+
+                                                        None
                                                     }
+                                                };
+
+                                                // println!("func_response: \"{:?}\"", func_response);
+
+                                                if let Some(func_response) = func_response {
+                                                    message_history.push(
+                                                        ChatCompletionRequestFunctionMessageArgs::default()
+                                                            .name(fn_name.clone())
+                                                            .content(func_response)
+                                                            .build()
+                                                            .unwrap()
+                                                            .into(),
+                                                    );
+
+                                                    continue 'request;
                                                 }
                                             }
                                         } else if let Some(content) = &chat_choice.delta.content {
