@@ -302,42 +302,44 @@ pub mod speakstream {
                 flume::Receiver<()>,
             ) = flume::unbounded();
 
+            let (converting_tx, converting_rx) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
+
+            // Create the tts_conversion_starting thread that will receive text segments to be turned into speech
+            {
+                let converting_tx = converting_tx.clone();
+                let thread_voice = voice.clone();
+                let thread_ai_tts_rx = ai_tts_rx.clone();
+                tokio::spawn(async move {
+                    let span = span!(Level::ERROR, "tts_conversion_starting_thread");
+                    let _enter = span.enter();
+
+                    info!("tts_conversion_thread started");
+
+                    // Queue up any text segments to be turned into speech.
+                    while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
+                        let thread_voice = thread_voice.clone();
+                        let text_being_converted = ai_text.clone();
+                        converting_tx
+                            .send_async(tokio::spawn(async move {
+                                turn_text_to_speech(ai_text, speech_speed, thread_voice)
+                            }))
+                            .await
+                            .unwrap();
+                        info!(
+                            "sent text segment to tts conversion thread: \"{}\"",
+                            text_being_converted
+                        );
+                    }
+                });
+            }
+
             // Create text to speech conversion thread
-            // that will convert text to speech and pass the audio file path to
+            // that will pass the audio file path to
             // the ai voice audio playing thread
             let thread_ai_tts_rx = ai_tts_rx.clone();
             let thread_voice = voice.clone();
             tokio::spawn(async move {
-                let (converting_tx, converting_rx) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
-
-                {
-                    let converting_tx = converting_tx.clone();
-                    let thread_voice = thread_voice.clone();
-                    tokio::spawn(async move {
-                        let span = span!(Level::ERROR, "tts_conversion_thread");
-                        let _enter = span.enter();
-
-                        info!("tts_conversion_thread started");
-
-                        // Queue up any text segments to be turned into speech.
-                        while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
-                            let thread_voice = thread_voice.clone();
-                            let text_being_converted = ai_text.clone();
-                            converting_tx
-                                .send_async(tokio::spawn(async move {
-                                    turn_text_to_speech(ai_text, speech_speed, thread_voice)
-                                }))
-                                .await
-                                .unwrap();
-                            info!(
-                                "sent text segment to tts conversion thread: \"{}\"",
-                                text_being_converted
-                            );
-                        }
-                    });
-                }
-
-                let span = span!(Level::ERROR, "tts_conversion_awaiting_thread");
+                let span = span!(Level::ERROR, "tts_handle_completed_conversion_thread");
                 let _enter = span.enter();
 
                 loop {
