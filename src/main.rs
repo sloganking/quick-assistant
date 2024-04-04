@@ -42,29 +42,29 @@ use speakstream::speakstream as ss;
 #[command(version)]
 struct Opt {
     /// The audio device to use for recording. Leaving this blank will use the default device.
-    #[arg(short, long, default_value_t = String::from("default"))]
+    #[arg(long, default_value_t = String::from("default"))]
     device: String,
 
     /// Your OpenAI API key
-    #[arg(short, long)]
+    #[arg(long)]
     api_key: Option<String>,
 
     /// The push to talk key
-    #[arg(short, long)]
+    #[arg(long)]
     ptt_key: Option<PTTKey>,
 
     /// The push to talk key.
     /// Use this if you want to use a key that is not supported by the PTTKey enum.
-    #[arg(short, long, conflicts_with("ptt_key"))]
+    #[arg(long, conflicts_with("ptt_key"))]
     special_ptt_key: Option<u32>,
 
     /// How fast the AI speaks. 1.0 is normal speed.
     /// 0.5 is minimum. 100.0 is maximum.
-    #[arg(short, long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = 1.0)]
     speech_speed: f32,
 
     /// The voice that the AI will use to speak.
-    #[arg(short, long)]
+    #[arg(long)]
     ai_voice: Option<VoiceEnum>,
 
     #[clap(subcommand)]
@@ -723,6 +723,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                         let mut fn_name = String::new();
                         let mut fn_args = String::new();
+                        let mut inside_code_block = false;
+                        // negative number to indicate that the last codeblock line is unknown
+                        let mut last_codeblock_line_option: Option<usize> = None;
+
 
                         while let Some(result) = {
                             match runtime
@@ -887,11 +891,73 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                             print!("{}", content);
                                             ai_content += content;
+         
+                                            let mut last_non_empty_line_option = None;
+                                            // return the last non empy line and it's line number
+                                            for (line_num, line_content) in ai_content.lines().enumerate(){
+                                                if !line_content.is_empty(){
+                                                    last_non_empty_line_option = Some((line_num, line_content));
+                                                }
+                                            }
 
-                                            let mut thread_speak_stream =
+                                   
+
+                                            // check if option is none or if the last codeblock line is different from the current line
+
+                                            if let Some((line_num, line_content)) = last_non_empty_line_option{
+                                                match last_codeblock_line_option{
+                                                    Some(last_codeblock_line) => {
+                                                        // println!("{} {}", "last_codeblock_line: ".truecolor(0, 0, 255), last_codeblock_line);
+                                                        // println!("{} {}", "line_num: ".truecolor(0, 0, 255), line_num);
+                                                        if last_codeblock_line != line_num{
+                                                            // println!("{}", "!last_codeblock_line == line_num".truecolor(0, 0, 255));
+                                                            match inside_code_block{
+                                                                false => {
+                                                                    if line_content.starts_with("```"){
+                                                                        inside_code_block = true;
+                                                                        print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
+                                                                        last_codeblock_line_option = Some(line_num);
+
+                                                                        // Tells the ai voice to speak the remaining text in the buffer
+                                                                        let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                                                                        thread_speak_stream.complete_sentence();
+                                                                        drop(thread_speak_stream);
+                                                                    }
+                                                                }
+                                                                true => {
+                                                                    // println!("{}", "inside_code_block is true".truecolor(0, 0, 255));
+                                                                    if line_content.ends_with("```"){
+                                                                        inside_code_block = false;
+                                                                      
+                                                                        print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
+                                                                        last_codeblock_line_option = Some(line_num);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    None => {
+                                                        if line_content.starts_with("```"){
+                                                            inside_code_block = true;
+                                                           
+                                                            print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
+                                                            last_codeblock_line_option = Some(line_num);
+
+                                                            // Tells the ai voice to speak the remaining text in the buffer
+                                                            let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                                                            thread_speak_stream.complete_sentence();
+                                                            drop(thread_speak_stream);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if !inside_code_block{
+                                                let mut thread_speak_stream =
                                                 thread_speak_stream_mutex.lock().unwrap();
-                                            thread_speak_stream.add_token(content);
-                                            drop(thread_speak_stream);
+                                                thread_speak_stream.add_token(content);
+                                                drop(thread_speak_stream);
+                                            }
                                         }
                                     }
                                 }
