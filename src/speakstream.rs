@@ -1,9 +1,7 @@
 pub mod speakstream {
 
     use anyhow::Context;
-    use cpal::traits::HostTrait;
     use futures::{future::FutureExt, select};
-    use rodio::DeviceTrait;
     use rodio::OutputStream;
     use std::io::BufReader;
     use std::path::Path;
@@ -372,22 +370,11 @@ pub mod speakstream {
                     .context("Failed to create tokio runtime")
                     .unwrap();
 
-                let mut default_device_name = cpal::default_host()
-                    .default_output_device()
-                    .unwrap()
-                    .name()
-                    .ok();
-
                 let (mut _stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
                 let mut ai_voice_sink = Arc::new(ai_voice_sink);
 
                 for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
-                    // if the default device has changed, update the sink
-                    let default_device = cpal::default_host().default_output_device().unwrap();
-                    // if default_device.name().ok() != default_device_name {
-                    // default_device_name = default_device.name().ok();
-
                     // create new stream and sink
                     let (new_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
                     let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
@@ -396,12 +383,6 @@ pub mod speakstream {
                     ai_voice_sink = Arc::new(new_ai_voice_sink);
                     _stream = new_stream;
 
-                    // println!(
-                    //     "{}{:?}",
-                    //     "Default output device changed to: ".truecolor(255, 165, 0),
-                    //     default_device_name
-                    // );
-                    // }
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
