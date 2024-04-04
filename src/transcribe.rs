@@ -1,4 +1,3 @@
-
 use anyhow::{bail, Context};
 use async_openai::{config::OpenAIConfig, types::CreateTranscriptionRequestArgs, Client};
 use std::{

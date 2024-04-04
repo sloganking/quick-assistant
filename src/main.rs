@@ -1,6 +1,6 @@
 use anyhow::Context;
 use async_openai::types::{
-    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason
+    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
 };
 use dotenvy::dotenv;
 use serde_json::json;
@@ -669,7 +669,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": ["brightness"],
                                     }))
                                     .build().unwrap(),
-                                    
+
                                 ChatCompletionFunctionsArgs::default()
                                     .name("media_controls")
                                     .description("Plays/Pauses/Seeks media.")
@@ -729,7 +729,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // negative number to indicate that the last codeblock line is unknown
                         let mut last_codeblock_line_option: Option<usize> = None;
                         let mut figure_number = 1;
-
 
                         while let Some(result) = {
                             match runtime
@@ -795,52 +794,80 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             .parse::<u32>()
                                                             .unwrap();
 
-                                                        println!("{}{}","set_screen_brightness: ".purple(), brightness);
+                                                        println!(
+                                                            "{}{}",
+                                                            "set_screen_brightness: ".purple(),
+                                                            brightness
+                                                        );
 
-                                                        if set_screen_brightness(brightness).is_some(){
+                                                        if set_screen_brightness(brightness)
+                                                            .is_some()
+                                                        {
                                                             Some("Brightness set")
                                                         } else {
                                                             Some("Failed to set brightness")
                                                         }
-                                                    },
+                                                    }
                                                     "media_controls" => {
                                                         let args: serde_json::Value =
                                                             serde_json::from_str(&fn_args).unwrap();
-                                                        let media_button = args["media_button"]
-                                                            .as_str()
-                                                            .unwrap();
+                                                        let media_button =
+                                                            args["media_button"].as_str().unwrap();
 
-                                                        println!("{}{}","media_controls: ".purple(), media_button);
+                                                        println!(
+                                                            "{}{}",
+                                                            "media_controls: ".purple(),
+                                                            media_button
+                                                        );
 
                                                         match media_button {
                                                             "MediaStop" => {
-                                                                enigo.key_click(enigo::Key::MediaStop);
+                                                                enigo.key_click(
+                                                                    enigo::Key::MediaStop,
+                                                                );
                                                             }
                                                             "MediaNextTrack" => {
-                                                                enigo.key_click(enigo::Key::MediaNextTrack);
+                                                                enigo.key_click(
+                                                                    enigo::Key::MediaNextTrack,
+                                                                );
                                                             }
                                                             "MediaPlayPause" => {
-                                                                enigo.key_click(enigo::Key::MediaPlayPause);
+                                                                enigo.key_click(
+                                                                    enigo::Key::MediaPlayPause,
+                                                                );
                                                             }
                                                             "MediaPrevTrack" => {
-                                                                enigo.key_click(enigo::Key::MediaPrevTrack);
-                                                                enigo.key_click(enigo::Key::MediaPrevTrack);
+                                                                enigo.key_click(
+                                                                    enigo::Key::MediaPrevTrack,
+                                                                );
+                                                                enigo.key_click(
+                                                                    enigo::Key::MediaPrevTrack,
+                                                                );
                                                             }
                                                             "VolumeUp" => {
                                                                 for _ in 0..5 {
-                                                                    enigo.key_click(enigo::Key::VolumeUp);
+                                                                    enigo.key_click(
+                                                                        enigo::Key::VolumeUp,
+                                                                    );
                                                                 }
                                                             }
                                                             "VolumeDown" => {
                                                                 for _ in 0..5 {
-                                                                    enigo.key_click(enigo::Key::VolumeDown);
+                                                                    enigo.key_click(
+                                                                        enigo::Key::VolumeDown,
+                                                                    );
                                                                 }
                                                             }
                                                             "VolumeMute" => {
-                                                                enigo.key_click(enigo::Key::VolumeMute);
+                                                                enigo.key_click(
+                                                                    enigo::Key::VolumeMute,
+                                                                );
                                                             }
                                                             _ => {
-                                                                println!("Unknown media button: {}", media_button);
+                                                                println!(
+                                                                    "Unknown media button: {}",
+                                                                    media_button
+                                                                );
                                                             }
                                                         }
 
@@ -850,16 +877,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                     "open_application" => {
                                                         let args: serde_json::Value =
                                                             serde_json::from_str(&fn_args).unwrap();
-                                                        let application = args["application"]
-                                                            .as_str()
-                                                            .unwrap();
+                                                        let application =
+                                                            args["application"].as_str().unwrap();
 
-                                                        println!("{}{}","opening application: ".purple(), application);
+                                                        println!(
+                                                            "{}{}",
+                                                            "opening application: ".purple(),
+                                                            application
+                                                        );
 
                                                         enigo.key_click(enigo::Key::Meta);
-                                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                                        std::thread::sleep(
+                                                            std::time::Duration::from_millis(500),
+                                                        );
                                                         enigo.key_sequence(application);
-                                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                                        std::thread::sleep(
+                                                            std::time::Duration::from_millis(500),
+                                                        );
                                                         enigo.key_click(enigo::Key::Return);
 
                                                         None
@@ -894,50 +928,66 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                             print!("{}", content);
                                             ai_content += content;
-         
+
                                             let mut last_non_empty_line_option = None;
                                             // return the last non empy line and it's line number
-                                            for (line_num, line_content) in ai_content.lines().enumerate(){
-                                                if !line_content.is_empty(){
-                                                    last_non_empty_line_option = Some((line_num, line_content));
+                                            for (line_num, line_content) in
+                                                ai_content.lines().enumerate()
+                                            {
+                                                if !line_content.is_empty() {
+                                                    last_non_empty_line_option =
+                                                        Some((line_num, line_content));
                                                 }
                                             }
 
-                                            fn mark_inside_code_block(inside_code_block: &mut bool, last_codeblock_line_option: &mut Option<usize>, line_num: usize, figure_number: &mut i32, thread_speak_stream_mutex: &Arc<Mutex<SpeakStream>>){
+                                            fn mark_inside_code_block(
+                                                inside_code_block: &mut bool,
+                                                last_codeblock_line_option: &mut Option<usize>,
+                                                line_num: usize,
+                                                figure_number: &mut i32,
+                                                thread_speak_stream_mutex: &Arc<Mutex<SpeakStream>>,
+                                            ) {
                                                 *inside_code_block = true;
                                                 // print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
                                                 *last_codeblock_line_option = Some(line_num);
 
                                                 // add figure text
-                                                let see_figure_message = format!(". See figure {}... ", figure_number);
+                                                let see_figure_message =
+                                                    format!(". See figure {}... ", figure_number);
                                                 *figure_number += 1;
                                                 // speak figure message
                                                 let mut thread_speak_stream =
-                                                thread_speak_stream_mutex.lock().unwrap();
+                                                    thread_speak_stream_mutex.lock().unwrap();
                                                 thread_speak_stream.add_token(&see_figure_message);
                                                 drop(thread_speak_stream);
 
                                                 // Tells the ai voice to speak the remaining text in the buffer
-                                                let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                                                let mut thread_speak_stream =
+                                                    thread_speak_stream_mutex.lock().unwrap();
                                                 thread_speak_stream.complete_sentence();
                                                 drop(thread_speak_stream);
                                             }
 
-                                            if let Some((line_num, line_content)) = last_non_empty_line_option{
-                                                match last_codeblock_line_option{
+                                            if let Some((line_num, line_content)) =
+                                                last_non_empty_line_option
+                                            {
+                                                match last_codeblock_line_option {
                                                     Some(last_codeblock_line) => {
-                                                        if last_codeblock_line != line_num{
-                                                            match inside_code_block{
+                                                        if last_codeblock_line != line_num {
+                                                            match inside_code_block {
                                                                 false => {
-                                                                    if line_content.starts_with("```"){
+                                                                    if line_content
+                                                                        .starts_with("```")
+                                                                    {
                                                                         mark_inside_code_block(&mut inside_code_block, &mut last_codeblock_line_option, line_num, &mut figure_number, &thread_speak_stream_mutex);
                                                                     }
                                                                 }
                                                                 true => {
                                                                     // println!("{}", "inside_code_block is true".truecolor(0, 0, 255));
-                                                                    if line_content.ends_with("```"){
+                                                                    if line_content.ends_with("```")
+                                                                    {
                                                                         inside_code_block = false;
-                                                                      
+
                                                                         // print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
                                                                         last_codeblock_line_option = Some(line_num);
                                                                     }
@@ -946,16 +996,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         }
                                                     }
                                                     None => {
-                                                        if line_content.starts_with("```"){
-                                                            mark_inside_code_block(&mut inside_code_block, &mut last_codeblock_line_option, line_num, &mut figure_number, &thread_speak_stream_mutex);
+                                                        if line_content.starts_with("```") {
+                                                            mark_inside_code_block(
+                                                                &mut inside_code_block,
+                                                                &mut last_codeblock_line_option,
+                                                                line_num,
+                                                                &mut figure_number,
+                                                                &thread_speak_stream_mutex,
+                                                            );
                                                         }
                                                     }
                                                 }
                                             }
 
-                                            if !inside_code_block{
+                                            if !inside_code_block {
                                                 let mut thread_speak_stream =
-                                                thread_speak_stream_mutex.lock().unwrap();
+                                                    thread_speak_stream_mutex.lock().unwrap();
                                                 thread_speak_stream.add_token(content);
                                                 drop(thread_speak_stream);
                                             }
