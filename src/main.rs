@@ -726,6 +726,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut inside_code_block = false;
                         // negative number to indicate that the last codeblock line is unknown
                         let mut last_codeblock_line_option: Option<usize> = None;
+                        let mut figure_number = 1;
 
 
                         while let Some(result) = {
@@ -918,6 +919,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                         print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
                                                                         last_codeblock_line_option = Some(line_num);
 
+                                                                        // add figure text
+                                                                        let see_figure_message = format!(". See figure {}... ", figure_number);
+                                                                        figure_number += 1;
+                                                                        // speak figure message
+                                                                        let mut thread_speak_stream =
+                                                                        thread_speak_stream_mutex.lock().unwrap();
+                                                                        thread_speak_stream.add_token(&see_figure_message);
+                                                                        drop(thread_speak_stream);
+
                                                                         // Tells the ai voice to speak the remaining text in the buffer
                                                                         let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
                                                                         thread_speak_stream.complete_sentence();
@@ -942,6 +952,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                            
                                                             print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
                                                             last_codeblock_line_option = Some(line_num);
+
+                                                            // add figure text
+                                                            let see_figure_message = format!(". See figure {}... ", figure_number);
+                                                            figure_number += 1;
+                                                            // speak figure message
+                                                            let mut thread_speak_stream =
+                                                            thread_speak_stream_mutex.lock().unwrap();
+                                                            thread_speak_stream.add_token(&see_figure_message);
+                                                            drop(thread_speak_stream);
+                                                            
 
                                                             // Tells the ai voice to speak the remaining text in the buffer
                                                             let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
