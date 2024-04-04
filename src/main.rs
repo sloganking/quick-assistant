@@ -38,6 +38,8 @@ mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::speakstream as ss;
 
+use crate::speakstream::speakstream::SpeakStream;
+
 #[derive(Parser, Debug)]
 #[command(version)]
 struct Opt {
@@ -901,37 +903,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 }
                                             }
 
-                                   
+                                            fn mark_inside_code_block(inside_code_block: &mut bool, last_codeblock_line_option: &mut Option<usize>, line_num: usize, figure_number: &mut i32, thread_speak_stream_mutex: &Arc<Mutex<SpeakStream>>){
+                                                *inside_code_block = true;
+                                                // print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
+                                                *last_codeblock_line_option = Some(line_num);
 
-                                            // check if option is none or if the last codeblock line is different from the current line
+                                                // add figure text
+                                                let see_figure_message = format!(". See figure {}... ", figure_number);
+                                                *figure_number += 1;
+                                                // speak figure message
+                                                let mut thread_speak_stream =
+                                                thread_speak_stream_mutex.lock().unwrap();
+                                                thread_speak_stream.add_token(&see_figure_message);
+                                                drop(thread_speak_stream);
+
+                                                // Tells the ai voice to speak the remaining text in the buffer
+                                                let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                                                thread_speak_stream.complete_sentence();
+                                                drop(thread_speak_stream);
+                                            }
 
                                             if let Some((line_num, line_content)) = last_non_empty_line_option{
                                                 match last_codeblock_line_option{
                                                     Some(last_codeblock_line) => {
-                                                        // println!("{} {}", "last_codeblock_line: ".truecolor(0, 0, 255), last_codeblock_line);
-                                                        // println!("{} {}", "line_num: ".truecolor(0, 0, 255), line_num);
                                                         if last_codeblock_line != line_num{
-                                                            // println!("{}", "!last_codeblock_line == line_num".truecolor(0, 0, 255));
                                                             match inside_code_block{
                                                                 false => {
                                                                     if line_content.starts_with("```"){
-                                                                        inside_code_block = true;
-                                                                        print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
-                                                                        last_codeblock_line_option = Some(line_num);
-
-                                                                        // add figure text
-                                                                        let see_figure_message = format!(". See figure {}... ", figure_number);
-                                                                        figure_number += 1;
-                                                                        // speak figure message
-                                                                        let mut thread_speak_stream =
-                                                                        thread_speak_stream_mutex.lock().unwrap();
-                                                                        thread_speak_stream.add_token(&see_figure_message);
-                                                                        drop(thread_speak_stream);
-
-                                                                        // Tells the ai voice to speak the remaining text in the buffer
-                                                                        let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
-                                                                        thread_speak_stream.complete_sentence();
-                                                                        drop(thread_speak_stream);
+                                                                        mark_inside_code_block(&mut inside_code_block, &mut last_codeblock_line_option, line_num, &mut figure_number, &thread_speak_stream_mutex);
                                                                     }
                                                                 }
                                                                 true => {
@@ -939,7 +938,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                     if line_content.ends_with("```"){
                                                                         inside_code_block = false;
                                                                       
-                                                                        print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
+                                                                        // print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
                                                                         last_codeblock_line_option = Some(line_num);
                                                                     }
                                                                 }
@@ -948,25 +947,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                     }
                                                     None => {
                                                         if line_content.starts_with("```"){
-                                                            inside_code_block = true;
-                                                           
-                                                            print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
-                                                            last_codeblock_line_option = Some(line_num);
-
-                                                            // add figure text
-                                                            let see_figure_message = format!(". See figure {}... ", figure_number);
-                                                            figure_number += 1;
-                                                            // speak figure message
-                                                            let mut thread_speak_stream =
-                                                            thread_speak_stream_mutex.lock().unwrap();
-                                                            thread_speak_stream.add_token(&see_figure_message);
-                                                            drop(thread_speak_stream);
-                                                            
-
-                                                            // Tells the ai voice to speak the remaining text in the buffer
-                                                            let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
-                                                            thread_speak_stream.complete_sentence();
-                                                            drop(thread_speak_stream);
+                                                            mark_inside_code_block(&mut inside_code_block, &mut last_codeblock_line_option, line_num, &mut figure_number, &thread_speak_stream_mutex);
                                                         }
                                                     }
                                                 }
