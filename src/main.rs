@@ -584,72 +584,75 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for audio_path in recording_rx.iter() {
-                    let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
-                    thread_speak_stream.stop_speech();
-                    drop(thread_speak_stream);
+                    let mut audio_path = audio_path;
 
-                    let transcription_result = match runtime.block_on(future::timeout(
-                        Duration::from_secs(10),
-                        transcribe::transcribe(&client, &audio_path),
-                    )) {
-                        Ok(transcription_result) => transcription_result,
-                        Err(err) => {
-                            println_error(&format!(
-                                "Failed to transcribe audio due to timeout: {:?}",
-                                err
-                            ));
+                    'handle_new_audio_path: loop {
+                        let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                        thread_speak_stream.stop_speech();
+                        drop(thread_speak_stream);
 
-                            play_audio(failed_temp_file.path());
+                        let transcription_result = match runtime.block_on(future::timeout(
+                            Duration::from_secs(10),
+                            transcribe::transcribe(&client, &audio_path),
+                        )) {
+                            Ok(transcription_result) => transcription_result,
+                            Err(err) => {
+                                println_error(&format!(
+                                    "Failed to transcribe audio due to timeout: {:?}",
+                                    err
+                                ));
 
+                                play_audio(failed_temp_file.path());
+
+                                continue;
+                            }
+                        };
+
+                        let mut transcription = match transcription_result {
+                            Ok(transcription) => transcription,
+                            Err(err) => {
+                                println_error(&format!("Failed to transcribe audio: {:?}", err));
+                                continue;
+                            }
+                        };
+
+                        if let Some(last_char) = transcription.chars().last() {
+                            if ['.', '?', '!', ','].contains(&last_char) {
+                                transcription.push(' ');
+                            }
+                        }
+
+                        if transcription.is_empty() {
+                            println!("No transcription");
                             continue;
                         }
-                    };
 
-                    let mut transcription = match transcription_result {
-                        Ok(transcription) => transcription,
-                        Err(err) => {
-                            println_error(&format!("Failed to transcribe audio: {:?}", err));
-                            continue;
-                        }
-                    };
+                        println!("{}", "You: ".truecolor(0, 255, 0));
+                        println!("{}", transcription);
 
-                    if let Some(last_char) = transcription.chars().last() {
-                        if ['.', '?', '!', ','].contains(&last_char) {
-                            transcription.push(' ');
-                        }
-                    }
+                        let time_header = format!("Local Time: {}", Local::now());
+                        let user_message = time_header + "\n" + &transcription;
 
-                    if transcription.is_empty() {
-                        println!("No transcription");
-                        continue;
-                    }
+                        message_history.push(
+                            ChatCompletionRequestUserMessageArgs::default()
+                                .content(user_message)
+                                .build()
+                                .unwrap()
+                                .into(),
+                        );
 
-                    println!("{}", "You: ".truecolor(0, 255, 0));
-                    println!("{}", transcription);
+                        // Make sure the LLM token generation is allowed to start
+                        // It should only be stopped when the LLM is running.
+                        // Since it's not running now, it should be allowed to start.
+                        let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
+                        *llm_should_stop = false;
+                        drop(llm_should_stop);
 
-                    let time_header = format!("Local Time: {}", Local::now());
-                    let user_message = time_header + "\n" + &transcription;
-
-                    message_history.push(
-                        ChatCompletionRequestUserMessageArgs::default()
-                            .content(user_message)
-                            .build()
-                            .unwrap()
-                            .into(),
-                    );
-
-                    // Make sure the LLM token generation is allowed to start
-                    // It should only be stopped when the LLM is running.
-                    // Since it's not running now, it should be allowed to start.
-                    let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
-                    *llm_should_stop = false;
-                    drop(llm_should_stop);
-
-                    // repeatedly create request until it's answered
-                    let mut displayed_ai_label = false;
-                    'request: loop {
-                        let mut ai_content = String::new();
-                        let request = CreateChatCompletionRequestArgs::default()
+                        // repeatedly create request until it's answered
+                        let mut displayed_ai_label = false;
+                        'request: loop {
+                            let mut ai_content = String::new();
+                            let request = CreateChatCompletionRequestArgs::default()
                             // .model("gpt-3.5-turbo")
                             .model("gpt-4-turbo-preview")
                             .max_tokens(512u16)
@@ -697,47 +700,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .build()
                             .unwrap();
 
-                        let mut stream = match runtime.block_on(future::timeout(
-                            Duration::from_secs(15),
-                            client.chat().create_stream(request),
-                        )) {
-                            Ok(stream) => match stream {
-                                Ok(stream) => stream,
-                                Err(err) => {
-                                    println_error(&format!("Failed to create stream: {}", err));
+                            let mut stream = match runtime.block_on(future::timeout(
+                                Duration::from_secs(15),
+                                client.chat().create_stream(request),
+                            )) {
+                                Ok(stream) => match stream {
+                                    Ok(stream) => stream,
+                                    Err(err) => {
+                                        println_error(&format!("Failed to create stream: {}", err));
 
-                                    play_audio(failed_temp_file.path());
+                                        play_audio(failed_temp_file.path());
 
-                                    break 'request;
-                                }
-                            },
-                            Err(err) => {
-                                println_error(&format!(
-                                    "Failed to create stream due to timeout: {:?}",
-                                    err
-                                ));
-
-                                play_audio(failed_temp_file.path());
-
-                                break 'request;
-                            }
-                        };
-
-                        let mut fn_name = String::new();
-                        let mut fn_args = String::new();
-                        let mut inside_code_block = false;
-                        // negative number to indicate that the last codeblock line is unknown
-                        let mut last_codeblock_line_option: Option<usize> = None;
-                        let mut figure_number = 1;
-
-                        while let Some(result) = {
-                            match runtime
-                                .block_on(future::timeout(Duration::from_secs(15), stream.next()))
-                            {
-                                Ok(result) => result,
+                                        break 'request;
+                                    }
+                                },
                                 Err(err) => {
                                     println_error(&format!(
-                                        "Failed to get response from AI due to timeout: {:?}",
+                                        "Failed to create stream due to timeout: {:?}",
                                         err
                                     ));
 
@@ -745,170 +724,232 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                     break 'request;
                                 }
-                            }
-                        } {
-                            let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
+                            };
 
-                            if *llm_should_stop {
-                                *llm_should_stop = false;
+                            let mut fn_name = String::new();
+                            let mut fn_args = String::new();
+                            let mut inside_code_block = false;
+                            // negative number to indicate that the last codeblock line is unknown
+                            let mut last_codeblock_line_option: Option<usize> = None;
+                            let mut figure_number = 1;
 
-                                // remember what the AI said so far.
-                                message_history.push(
-                                    ChatCompletionRequestAssistantMessageArgs::default()
-                                        .content(&ai_content)
-                                        // .role(Role::Assistant)
-                                        .build()
-                                        .unwrap()
-                                        .into(),
-                                );
+                            while let Some(result) = {
+                                match runtime.block_on(future::timeout(
+                                    Duration::from_secs(15),
+                                    stream.next(),
+                                )) {
+                                    Ok(result) => result,
+                                    Err(err) => {
+                                        println_error(&format!(
+                                            "Failed to get response from AI due to timeout: {:?}",
+                                            err
+                                        ));
 
-                                println!();
+                                        play_audio(failed_temp_file.path());
 
-                                break 'request;
-                            }
-                            drop(llm_should_stop);
+                                        break 'request;
+                                    }
+                                }
+                            } {
+                                // Stop token generation and handle new message if new audio path is received from the user.
+                                if let Ok(received_audio_path) = recording_rx.try_recv() {
+                                    audio_path = received_audio_path;
 
-                            match result {
-                                Ok(response) => {
-                                    for chat_choice in response.choices {
-                                        #[allow(deprecated)]
-                                        if let Some(fn_call) = &chat_choice.delta.function_call {
-                                            if let Some(name) = &fn_call.name {
-                                                fn_name = name.clone();
+                                    // remember what the AI said so far.
+                                    message_history.push(
+                                        ChatCompletionRequestAssistantMessageArgs::default()
+                                            .content(&ai_content)
+                                            // .role(Role::Assistant)
+                                            .build()
+                                            .unwrap()
+                                            .into(),
+                                    );
+
+                                    println!();
+
+                                    continue 'handle_new_audio_path;
+                                }
+
+                                let mut llm_should_stop =
+                                    thread_llm_should_stop_mutex.lock().unwrap();
+
+                                if *llm_should_stop {
+                                    *llm_should_stop = false;
+
+                                    // remember what the AI said so far.
+                                    message_history.push(
+                                        ChatCompletionRequestAssistantMessageArgs::default()
+                                            .content(&ai_content)
+                                            // .role(Role::Assistant)
+                                            .build()
+                                            .unwrap()
+                                            .into(),
+                                    );
+
+                                    println!();
+
+                                    break 'request;
+                                }
+                                drop(llm_should_stop);
+
+                                match result {
+                                    Ok(response) => {
+                                        for chat_choice in response.choices {
+                                            #[allow(deprecated)]
+                                            if let Some(fn_call) = &chat_choice.delta.function_call
+                                            {
+                                                if let Some(name) = &fn_call.name {
+                                                    fn_name = name.clone();
+                                                }
+                                                if let Some(args) = &fn_call.arguments {
+                                                    fn_args.push_str(args);
+                                                }
                                             }
-                                            if let Some(args) = &fn_call.arguments {
-                                                fn_args.push_str(args);
-                                            }
-                                        }
-                                        if let Some(finish_reason) = &chat_choice.finish_reason {
-                                            if matches!(finish_reason, FinishReason::FunctionCall) {
-                                                // call_fn(&client, &fn_name, &fn_args).await?;
+                                            if let Some(finish_reason) = &chat_choice.finish_reason
+                                            {
+                                                if matches!(
+                                                    finish_reason,
+                                                    FinishReason::FunctionCall
+                                                ) {
+                                                    // call_fn(&client, &fn_name, &fn_args).await?;
 
-                                                let func_response = match fn_name.as_str() {
-                                                    "set_screen_brightness" => {
-                                                        let args: serde_json::Value =
-                                                            serde_json::from_str(&fn_args).unwrap();
-                                                        let brightness = args["brightness"]
-                                                            .as_str()
-                                                            .unwrap()
-                                                            .parse::<u32>()
-                                                            .unwrap();
+                                                    let func_response = match fn_name.as_str() {
+                                                        "set_screen_brightness" => {
+                                                            let args: serde_json::Value =
+                                                                serde_json::from_str(&fn_args)
+                                                                    .unwrap();
+                                                            let brightness = args["brightness"]
+                                                                .as_str()
+                                                                .unwrap()
+                                                                .parse::<u32>()
+                                                                .unwrap();
 
-                                                        println!(
-                                                            "{}{}",
-                                                            "set_screen_brightness: ".purple(),
-                                                            brightness
-                                                        );
+                                                            println!(
+                                                                "{}{}",
+                                                                "set_screen_brightness: ".purple(),
+                                                                brightness
+                                                            );
 
-                                                        if set_screen_brightness(brightness)
-                                                            .is_some()
-                                                        {
-                                                            Some("Brightness set")
-                                                        } else {
-                                                            Some("Failed to set brightness")
+                                                            if set_screen_brightness(brightness)
+                                                                .is_some()
+                                                            {
+                                                                Some("Brightness set")
+                                                            } else {
+                                                                Some("Failed to set brightness")
+                                                            }
                                                         }
-                                                    }
-                                                    "media_controls" => {
-                                                        let args: serde_json::Value =
-                                                            serde_json::from_str(&fn_args).unwrap();
-                                                        let media_button =
-                                                            args["media_button"].as_str().unwrap();
+                                                        "media_controls" => {
+                                                            let args: serde_json::Value =
+                                                                serde_json::from_str(&fn_args)
+                                                                    .unwrap();
+                                                            let media_button = args["media_button"]
+                                                                .as_str()
+                                                                .unwrap();
 
-                                                        println!(
-                                                            "{}{}",
-                                                            "media_controls: ".purple(),
-                                                            media_button
-                                                        );
+                                                            println!(
+                                                                "{}{}",
+                                                                "media_controls: ".purple(),
+                                                                media_button
+                                                            );
 
-                                                        match media_button {
-                                                            "MediaStop" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaStop,
-                                                                );
-                                                            }
-                                                            "MediaNextTrack" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaNextTrack,
-                                                                );
-                                                            }
-                                                            "MediaPlayPause" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaPlayPause,
-                                                                );
-                                                            }
-                                                            "MediaPrevTrack" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaPrevTrack,
-                                                                );
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaPrevTrack,
-                                                                );
-                                                            }
-                                                            "VolumeUp" => {
-                                                                for _ in 0..5 {
+                                                            match media_button {
+                                                                "MediaStop" => {
                                                                     enigo.key_click(
-                                                                        enigo::Key::VolumeUp,
+                                                                        enigo::Key::MediaStop,
+                                                                    );
+                                                                }
+                                                                "MediaNextTrack" => {
+                                                                    enigo.key_click(
+                                                                        enigo::Key::MediaNextTrack,
+                                                                    );
+                                                                }
+                                                                "MediaPlayPause" => {
+                                                                    enigo.key_click(
+                                                                        enigo::Key::MediaPlayPause,
+                                                                    );
+                                                                }
+                                                                "MediaPrevTrack" => {
+                                                                    enigo.key_click(
+                                                                        enigo::Key::MediaPrevTrack,
+                                                                    );
+                                                                    enigo.key_click(
+                                                                        enigo::Key::MediaPrevTrack,
+                                                                    );
+                                                                }
+                                                                "VolumeUp" => {
+                                                                    for _ in 0..5 {
+                                                                        enigo.key_click(
+                                                                            enigo::Key::VolumeUp,
+                                                                        );
+                                                                    }
+                                                                }
+                                                                "VolumeDown" => {
+                                                                    for _ in 0..5 {
+                                                                        enigo.key_click(
+                                                                            enigo::Key::VolumeDown,
+                                                                        );
+                                                                    }
+                                                                }
+                                                                "VolumeMute" => {
+                                                                    enigo.key_click(
+                                                                        enigo::Key::VolumeMute,
+                                                                    );
+                                                                }
+                                                                _ => {
+                                                                    println!(
+                                                                        "Unknown media button: {}",
+                                                                        media_button
                                                                     );
                                                                 }
                                                             }
-                                                            "VolumeDown" => {
-                                                                for _ in 0..5 {
-                                                                    enigo.key_click(
-                                                                        enigo::Key::VolumeDown,
-                                                                    );
-                                                                }
-                                                            }
-                                                            "VolumeMute" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::VolumeMute,
-                                                                );
-                                                            }
-                                                            _ => {
-                                                                println!(
-                                                                    "Unknown media button: {}",
-                                                                    media_button
-                                                                );
-                                                            }
+
+                                                            None
                                                         }
 
-                                                        None
-                                                    }
+                                                        "open_application" => {
+                                                            let args: serde_json::Value =
+                                                                serde_json::from_str(&fn_args)
+                                                                    .unwrap();
+                                                            let application = args["application"]
+                                                                .as_str()
+                                                                .unwrap();
 
-                                                    "open_application" => {
-                                                        let args: serde_json::Value =
-                                                            serde_json::from_str(&fn_args).unwrap();
-                                                        let application =
-                                                            args["application"].as_str().unwrap();
+                                                            println!(
+                                                                "{}{}",
+                                                                "opening application: ".purple(),
+                                                                application
+                                                            );
 
-                                                        println!(
-                                                            "{}{}",
-                                                            "opening application: ".purple(),
-                                                            application
-                                                        );
+                                                            enigo.key_click(enigo::Key::Meta);
+                                                            std::thread::sleep(
+                                                                std::time::Duration::from_millis(
+                                                                    500,
+                                                                ),
+                                                            );
+                                                            enigo.key_sequence(application);
+                                                            std::thread::sleep(
+                                                                std::time::Duration::from_millis(
+                                                                    500,
+                                                                ),
+                                                            );
+                                                            enigo.key_click(enigo::Key::Return);
 
-                                                        enigo.key_click(enigo::Key::Meta);
-                                                        std::thread::sleep(
-                                                            std::time::Duration::from_millis(500),
-                                                        );
-                                                        enigo.key_sequence(application);
-                                                        std::thread::sleep(
-                                                            std::time::Duration::from_millis(500),
-                                                        );
-                                                        enigo.key_click(enigo::Key::Return);
+                                                            None
+                                                        }
+                                                        _ => {
+                                                            println!(
+                                                                "Unknown function: {}",
+                                                                fn_name
+                                                            );
 
-                                                        None
-                                                    }
-                                                    _ => {
-                                                        println!("Unknown function: {}", fn_name);
+                                                            None
+                                                        }
+                                                    };
 
-                                                        None
-                                                    }
-                                                };
+                                                    // println!("func_response: \"{:?}\"", func_response);
 
-                                                // println!("func_response: \"{:?}\"", func_response);
-
-                                                if let Some(func_response) = func_response {
-                                                    message_history.push(
+                                                    if let Some(func_response) = func_response {
+                                                        message_history.push(
                                                         ChatCompletionRequestFunctionMessageArgs::default()
                                                             .name(fn_name.clone())
                                                             .content(func_response)
@@ -917,139 +958,150 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             .into(),
                                                     );
 
-                                                    continue 'request;
+                                                        continue 'request;
+                                                    }
                                                 }
-                                            }
-                                        } else if let Some(content) = &chat_choice.delta.content {
-                                            if !displayed_ai_label {
-                                                println!("{}", "AI: ".truecolor(0, 0, 255));
-                                                displayed_ai_label = true;
-                                            }
-
-                                            print!("{}", content);
-                                            ai_content += content;
-
-                                            let mut last_non_empty_line_option = None;
-                                            // return the last non empy line and it's line number
-                                            for (line_num, line_content) in
-                                                ai_content.lines().enumerate()
+                                            } else if let Some(content) = &chat_choice.delta.content
                                             {
-                                                if !line_content.is_empty() {
-                                                    last_non_empty_line_option =
-                                                        Some((line_num, line_content));
+                                                if !displayed_ai_label {
+                                                    println!("{}", "AI: ".truecolor(0, 0, 255));
+                                                    displayed_ai_label = true;
                                                 }
-                                            }
 
-                                            fn mark_inside_code_block(
-                                                inside_code_block: &mut bool,
-                                                last_codeblock_line_option: &mut Option<usize>,
-                                                line_num: usize,
-                                                figure_number: &mut i32,
-                                                thread_speak_stream_mutex: &Arc<Mutex<SpeakStream>>,
-                                            ) {
-                                                *inside_code_block = true;
-                                                // print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
-                                                *last_codeblock_line_option = Some(line_num);
+                                                print!("{}", content);
+                                                ai_content += content;
 
-                                                // add figure text
-                                                let see_figure_message =
-                                                    format!(". See figure {}... ", figure_number);
-                                                *figure_number += 1;
-                                                // speak figure message
-                                                let mut thread_speak_stream =
-                                                    thread_speak_stream_mutex.lock().unwrap();
-                                                thread_speak_stream.add_token(&see_figure_message);
-                                                drop(thread_speak_stream);
+                                                let mut last_non_empty_line_option = None;
+                                                // return the last non empy line and it's line number
+                                                for (line_num, line_content) in
+                                                    ai_content.lines().enumerate()
+                                                {
+                                                    if !line_content.is_empty() {
+                                                        last_non_empty_line_option =
+                                                            Some((line_num, line_content));
+                                                    }
+                                                }
 
-                                                // Tells the ai voice to speak the remaining text in the buffer
-                                                let mut thread_speak_stream =
-                                                    thread_speak_stream_mutex.lock().unwrap();
-                                                thread_speak_stream.complete_sentence();
-                                                drop(thread_speak_stream);
-                                            }
+                                                fn mark_inside_code_block(
+                                                    inside_code_block: &mut bool,
+                                                    last_codeblock_line_option: &mut Option<usize>,
+                                                    line_num: usize,
+                                                    figure_number: &mut i32,
+                                                    thread_speak_stream_mutex: &Arc<
+                                                        Mutex<SpeakStream>,
+                                                    >,
+                                                ) {
+                                                    *inside_code_block = true;
+                                                    // print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
+                                                    *last_codeblock_line_option = Some(line_num);
 
-                                            if let Some((line_num, line_content)) =
-                                                last_non_empty_line_option
-                                            {
-                                                match last_codeblock_line_option {
-                                                    Some(last_codeblock_line) => {
-                                                        if last_codeblock_line != line_num {
-                                                            match inside_code_block {
-                                                                false => {
-                                                                    if line_content
-                                                                        .starts_with("```")
-                                                                    {
-                                                                        mark_inside_code_block(&mut inside_code_block, &mut last_codeblock_line_option, line_num, &mut figure_number, &thread_speak_stream_mutex);
+                                                    // add figure text
+                                                    let see_figure_message = format!(
+                                                        ". See figure {}... ",
+                                                        figure_number
+                                                    );
+                                                    *figure_number += 1;
+                                                    // speak figure message
+                                                    let mut thread_speak_stream =
+                                                        thread_speak_stream_mutex.lock().unwrap();
+                                                    thread_speak_stream
+                                                        .add_token(&see_figure_message);
+                                                    drop(thread_speak_stream);
+
+                                                    // Tells the ai voice to speak the remaining text in the buffer
+                                                    let mut thread_speak_stream =
+                                                        thread_speak_stream_mutex.lock().unwrap();
+                                                    thread_speak_stream.complete_sentence();
+                                                    drop(thread_speak_stream);
+                                                }
+
+                                                if let Some((line_num, line_content)) =
+                                                    last_non_empty_line_option
+                                                {
+                                                    match last_codeblock_line_option {
+                                                        Some(last_codeblock_line) => {
+                                                            if last_codeblock_line != line_num {
+                                                                match inside_code_block {
+                                                                    false => {
+                                                                        if line_content
+                                                                            .starts_with("```")
+                                                                        {
+                                                                            mark_inside_code_block(&mut inside_code_block, &mut last_codeblock_line_option, line_num, &mut figure_number, &thread_speak_stream_mutex);
+                                                                        }
                                                                     }
-                                                                }
-                                                                true => {
-                                                                    // println!("{}", "inside_code_block is true".truecolor(0, 0, 255));
-                                                                    if line_content.ends_with("```")
-                                                                    {
-                                                                        inside_code_block = false;
+                                                                    true => {
+                                                                        // println!("{}", "inside_code_block is true".truecolor(0, 0, 255));
+                                                                        if line_content
+                                                                            .ends_with("```")
+                                                                        {
+                                                                            inside_code_block =
+                                                                                false;
 
-                                                                        // print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
-                                                                        last_codeblock_line_option = Some(line_num);
+                                                                            // print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
+                                                                            last_codeblock_line_option = Some(line_num);
+                                                                        }
                                                                     }
                                                                 }
                                                             }
                                                         }
-                                                    }
-                                                    None => {
-                                                        if line_content.starts_with("```") {
-                                                            mark_inside_code_block(
-                                                                &mut inside_code_block,
-                                                                &mut last_codeblock_line_option,
-                                                                line_num,
-                                                                &mut figure_number,
-                                                                &thread_speak_stream_mutex,
-                                                            );
+                                                        None => {
+                                                            if line_content.starts_with("```") {
+                                                                mark_inside_code_block(
+                                                                    &mut inside_code_block,
+                                                                    &mut last_codeblock_line_option,
+                                                                    line_num,
+                                                                    &mut figure_number,
+                                                                    &thread_speak_stream_mutex,
+                                                                );
+                                                            }
                                                         }
                                                     }
                                                 }
-                                            }
 
-                                            if !inside_code_block {
-                                                let mut thread_speak_stream =
-                                                    thread_speak_stream_mutex.lock().unwrap();
-                                                thread_speak_stream.add_token(content);
-                                                drop(thread_speak_stream);
+                                                if !inside_code_block {
+                                                    let mut thread_speak_stream =
+                                                        thread_speak_stream_mutex.lock().unwrap();
+                                                    thread_speak_stream.add_token(content);
+                                                    drop(thread_speak_stream);
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                Err(_err) => {
-                                    println!("error: {_err}");
-                                    if !message_history.len() > 1 {
-                                        // remove 1 instead of 0 because the first message is a system message
-                                        message_history.remove(1);
+                                    Err(_err) => {
+                                        println!("error: {_err}");
+                                        if !message_history.len() > 1 {
+                                            // remove 1 instead of 0 because the first message is a system message
+                                            message_history.remove(1);
 
-                                        println!(
+                                            println!(
                                             "Removed message. There are now {} remembered messages",
                                             message_history.len()
                                         );
+                                        }
+                                        continue 'request;
                                     }
-                                    continue 'request;
                                 }
+                                stdout().flush().unwrap();
                             }
-                            stdout().flush().unwrap();
-                        }
-                        println!();
+                            println!();
 
-                        message_history.push(
-                            ChatCompletionRequestAssistantMessageArgs::default()
-                                .content(&ai_content)
-                                .build()
-                                .unwrap()
-                                .into(),
-                        );
+                            message_history.push(
+                                ChatCompletionRequestAssistantMessageArgs::default()
+                                    .content(&ai_content)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
+                            );
+                            break;
+                        }
+
+                        // Tells the ai voice to speak the remaining text in the buffer
+                        let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                        thread_speak_stream.complete_sentence();
+                        drop(thread_speak_stream);
+
                         break;
                     }
-
-                    // Tells the ai voice to speak the remaining text in the buffer
-                    let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
-                    thread_speak_stream.complete_sentence();
-                    drop(thread_speak_stream);
                 }
             });
 
