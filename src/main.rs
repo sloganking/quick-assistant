@@ -81,7 +81,9 @@ pub enum SubCommands {
     ListDevices,
 }
 
-/// This is just a straight copy of rdev::Key, so that #[derive(clap::ValueEnum)] works.
+/// This is a copy of rdev::Key, so that #[derive(clap::ValueEnum)] works.
+///
+/// I also added F13 through F24 for convenience.
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 pub enum PTTKey {
     /// Alt key on Linux and Windows (option key on macOS)
@@ -99,6 +101,18 @@ pub enum PTTKey {
     F10,
     F11,
     F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
     F2,
     F3,
     F4,
@@ -213,6 +227,18 @@ impl From<PTTKey> for rdev::Key {
             PTTKey::F10 => rdev::Key::F10,
             PTTKey::F11 => rdev::Key::F11,
             PTTKey::F12 => rdev::Key::F12,
+            PTTKey::F13 => rdev::Key::Unknown(124),
+            PTTKey::F14 => rdev::Key::Unknown(125),
+            PTTKey::F15 => rdev::Key::Unknown(126),
+            PTTKey::F16 => rdev::Key::Unknown(127),
+            PTTKey::F17 => rdev::Key::Unknown(128),
+            PTTKey::F18 => rdev::Key::Unknown(129),
+            PTTKey::F19 => rdev::Key::Unknown(130),
+            PTTKey::F20 => rdev::Key::Unknown(131),
+            PTTKey::F21 => rdev::Key::Unknown(132),
+            PTTKey::F22 => rdev::Key::Unknown(133),
+            PTTKey::F23 => rdev::Key::Unknown(134),
+            PTTKey::F24 => rdev::Key::Unknown(135),
             PTTKey::F2 => rdev::Key::F2,
             PTTKey::F3 => rdev::Key::F3,
             PTTKey::F4 => rdev::Key::F4,
