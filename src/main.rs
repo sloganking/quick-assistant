@@ -343,8 +343,6 @@ pub enum VoiceEnum {
     Onyx,
     Nova,
     Shimmer,
-    #[clap(skip)]
-    Other(String),
 }
 
 impl From<VoiceEnum> for Voice {
@@ -356,7 +354,6 @@ impl From<VoiceEnum> for Voice {
             VoiceEnum::Onyx => Voice::Onyx,
             VoiceEnum::Nova => Voice::Nova,
             VoiceEnum::Shimmer => Voice::Shimmer,
-            VoiceEnum::Other(string) => Voice::Other(string),
         }
     }
 }
@@ -781,7 +778,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 // remember what the AI said so far.
                                 message_history.push(
                                     ChatCompletionRequestAssistantMessageArgs::default()
-                                        .content(&ai_content)
+                                        .content(ai_content)
                                         // .role(Role::Assistant)
                                         .build()
                                         .unwrap()
@@ -1064,7 +1061,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                         message_history.push(
                             ChatCompletionRequestAssistantMessageArgs::default()
-                                .content(&ai_content)
+                                .content(ai_content)
                                 .build()
                                 .unwrap()
                                 .into(),

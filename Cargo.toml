@@ -8,7 +8,7 @@ default-run = "quick-assistant"
 
 [dependencies]
 anyhow = "1.0.75"
-async-openai = "0.18.2"
+async-openai = "0.25.0 "
 async-std = "1.12.0"
 clap = { version = "4.4.6", features = ["derive"] }
 cpal = "0.15.2"
