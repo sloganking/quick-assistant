@@ -9,32 +9,35 @@ pub struct Opt {
     #[arg(long, default_value_t = String::from("default"))]
     pub device: String,
 
-    /// Your OpenAI API key
+    /// Your OpenAI API key.
     #[arg(long)]
     pub api_key: Option<String>,
 
-    /// The push to talk key
+    /// The push-to-talk key used to activate the microphone.
     #[arg(long)]
     pub ptt_key: Option<easy_rdev_key::PTTKey>,
 
-    /// The push to talk key.
-    /// Use this if you want to use a key that is not supported by the PTTKey enum.
+    /// The push-to-talk key as a special keycode.
+    /// Use this if you want to use a key that is not supported by the `PTTKey` enum.
+    /// You can find out what number to pass for your key by running the `ShowKeyPresses` subcommand.
+    /// This option conflicts with `--ptt_key`.
     #[arg(long, conflicts_with("ptt_key"))]
     pub special_ptt_key: Option<u32>,
 
-    /// How fast the AI speaks. 1.0 is normal speed.
-    /// 0.5 is minimum. 100.0 is maximum.
+    /// How fast the AI speaks, with 1.0 as normal speed.
+    /// The value must be between 0.5 (slowest) and 100.0 (fastest).
     #[arg(long, default_value_t = 1.0)]
     pub speech_speed: f32,
 
     /// The voice that the AI will use to speak.
+    /// Choose from a list of available voices to customize the output.
     #[arg(long)]
     pub ai_voice: Option<VoiceEnum>,
 
     /// The language model used to generate responses.
-    ///
-    /// You can find the names of more models here.
-    /// https://platform.openai.com/docs/models/
+    /// Specify the name of the language model. For a list of available models, visit:
+    /// https://platform.openai.com/docs/models/.
+    /// Defaults to "gpt-4o".
     #[arg(long, default_value_t = String::from("gpt-4o"))]
     pub model: String,
 
