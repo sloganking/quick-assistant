@@ -38,41 +38,9 @@ mod easy_rdev_key;
 mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::speakstream as ss;
+mod options;
 
 use crate::speakstream::speakstream::SpeakStream;
-
-#[derive(Parser, Debug)]
-#[command(version)]
-struct Opt {
-    /// The audio device to use for recording. Leaving this blank will use the default device.
-    #[arg(long, default_value_t = String::from("default"))]
-    device: String,
-
-    /// Your OpenAI API key
-    #[arg(long)]
-    api_key: Option<String>,
-
-    /// The push to talk key
-    #[arg(long)]
-    ptt_key: Option<easy_rdev_key::PTTKey>,
-
-    /// The push to talk key.
-    /// Use this if you want to use a key that is not supported by the PTTKey enum.
-    #[arg(long, conflicts_with("ptt_key"))]
-    special_ptt_key: Option<u32>,
-
-    /// How fast the AI speaks. 1.0 is normal speed.
-    /// 0.5 is minimum. 100.0 is maximum.
-    #[arg(long, default_value_t = 1.0)]
-    speech_speed: f32,
-
-    /// The voice that the AI will use to speak.
-    #[arg(long)]
-    ai_voice: Option<VoiceEnum>,
-
-    #[clap(subcommand)]
-    pub subcommands: Option<SubCommands>,
-}
 
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {
@@ -141,7 +109,7 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut enigo = Enigo::new();
 
-    let opt = Opt::parse();
+    let opt = options::Opt::parse();
     let _ = dotenv();
 
     let ai_voice: Voice = match opt.ai_voice {
