@@ -809,6 +809,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Have this main thread recieve events and send them to the key handler thread
             {
+                // We send keys as a message in a channel instead of putting the key handler
+                // inside the callback function because the operating system's mouse and
+                // inputs freeze up when the callback is happening.
                 let callback = move |event: Event| {
                     key_handler_tx.send(event).unwrap();
                 };
