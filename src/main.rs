@@ -42,6 +42,34 @@ mod options;
 
 use crate::speakstream::speakstream::SpeakStream;
 
+use once_cell::sync::Lazy;
+use std::sync::mpsc::{self, Receiver, Sender};
+
+// Define a global sender
+static GLOBAL_SENDER: Lazy<Mutex<Sender<String>>> = Lazy::new(|| {
+    let (sender, _receiver) = mpsc::channel::<String>();
+    Mutex::new(sender)
+});
+
+// Initialization function to set up the sender and return the receiver
+fn initialize_channel() -> Receiver<String> {
+    let (sender, receiver) = mpsc::channel::<String>();
+    // Set the global sender
+    *GLOBAL_SENDER.lock().unwrap() = sender;
+    // Return the receiver for use in the main function or elsewhere
+    receiver
+}
+
+// Function to send a message through the global sender
+fn send_global_message(message: String) -> Result<(), String> {
+    let sender = GLOBAL_SENDER
+        .lock()
+        .map_err(|_| "Failed to acquire lock".to_string())?;
+    sender
+        .send(message)
+        .map_err(|_| "Failed to send message".to_string())
+}
+
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {
     /// Displays keys as you press them so you can figure out what key to use for push to talk.
@@ -300,36 +328,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            // Create AI thread
-            // This thread listens to the audio recorder thread and transcribes the audio
-            // before feeding it to the AI assistant.
-            let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
+            let (user_msg_tx, user_msg_rx): (flume::Sender<String>, flume::Receiver<String>) =
+                flume::unbounded();
+            let user_msg_tx_clone = user_msg_tx.clone();
             let thread_speak_stream_mutex = speak_stream_mutex.clone();
-            thread::spawn(move || {
+            // create audio to text transcription thread
+            tokio::spawn(async move {
+                // let user_msg_tx = user_msg_tx.clone();
+                let user_msg_tx = user_msg_tx_clone;
+
+                // let runtime = tokio::runtime::Runtime::new()
+                //     .context("Failed to create tokio runtime")
+                //     .unwrap();
+
                 let client = Client::new();
-                let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
-
-                message_history.push(
-                    ChatCompletionRequestSystemMessageArgs::default()
-                        .content("You are a desktop voice assistant. The messages you receive from the user are voice transcriptions. Your responses will be spoken out loud by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more'")
-                        .build()
-                        .unwrap()
-                        .into(),
-                );
-
-                let runtime = tokio::runtime::Runtime::new()
-                    .context("Failed to create tokio runtime")
-                    .unwrap();
 
                 for audio_path in recording_rx.iter() {
-                    let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
-                    thread_speak_stream.stop_speech();
-                    drop(thread_speak_stream);
+                    // let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                    // thread_speak_stream.stop_speech();
+                    // drop(thread_speak_stream);
 
-                    let transcription_result = match runtime.block_on(future::timeout(
+                    let transcription_result = match future::timeout(
                         Duration::from_secs(10),
                         transcribe::transcribe(&client, &audio_path),
-                    )) {
+                    )
+                    .await
+                    {
                         Ok(transcription_result) => transcription_result,
                         Err(err) => {
                             println_error(&format!(
@@ -362,6 +386,74 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
 
+                    user_msg_tx.send(transcription).unwrap();
+                }
+            });
+
+            // Create AI thread
+            // This thread listens to the audio recorder thread and transcribes the audio
+            // before feeding it to the AI assistant.
+            let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
+            let thread_speak_stream_mutex = speak_stream_mutex.clone();
+            thread::spawn(move || {
+                let user_msg_rx = user_msg_rx.clone();
+                let client = Client::new();
+                let mut message_history: Vec<ChatCompletionRequestMessage> = Vec::new();
+
+                message_history.push(
+                    ChatCompletionRequestSystemMessageArgs::default()
+                        .content("You are a desktop voice assistant. The messages you receive from the user are voice transcriptions. Your responses will be spoken out loud by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more'")
+                        .build()
+                        .unwrap()
+                        .into(),
+                );
+
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime")
+                    .unwrap();
+
+                for transcription in user_msg_rx.iter() {
+                    // let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                    // thread_speak_stream.stop_speech();
+                    // drop(thread_speak_stream);
+
+                    // let transcription_result = match runtime.block_on(future::timeout(
+                    //     Duration::from_secs(10),
+                    //     transcribe::transcribe(&client, &audio_path),
+                    // )) {
+                    //     Ok(transcription_result) => transcription_result,
+                    //     Err(err) => {
+                    //         println_error(&format!(
+                    //             "Failed to transcribe audio due to timeout: {:?}",
+                    //             err
+                    //         ));
+
+                    //         play_audio(failed_temp_file.path());
+
+                    //         continue;
+                    //     }
+                    // };
+
+                    // let mut transcription = match transcription_result {
+                    //     Ok(transcription) => transcription,
+                    //     Err(err) => {
+                    //         println_error(&format!("Failed to transcribe audio: {:?}", err));
+                    //         continue;
+                    //     }
+                    // };
+
+                    // if let Some(last_char) = transcription.chars().last() {
+                    //     if ['.', '?', '!', ','].contains(&last_char) {
+                    //         transcription.push(' ');
+                    //     }
+                    // }
+
+                    // if transcription.is_empty() {
+                    //     println!("No transcription");
+                    //     continue;
+                    // }
+
+                    let you_string = "You: ".truecolor(0, 255, 0);
                     println!("{}", "You: ".truecolor(0, 255, 0));
                     println!("{}", transcription);
 
@@ -444,7 +536,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Err(err) => {
                                     println_error(&format!("Failed to create stream: {}", err));
 
-                                    play_audio(failed_temp_file.path());
+                                    // play_audio(failed_temp_file.path());
 
                                     break 'request;
                                 }
@@ -455,7 +547,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     err
                                 ));
 
-                                play_audio(failed_temp_file.path());
+                                // play_audio(failed_temp_file.path());
 
                                 break 'request;
                             }
@@ -479,7 +571,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         err
                                     ));
 
-                                    play_audio(failed_temp_file.path());
+                                    // play_audio(failed_temp_file.path());
 
                                     break 'request;
                                 }
@@ -805,6 +897,137 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
                     // sink.play();
                 }
+            });
+
+            use std::io;
+            use std::time::Duration;
+
+            use crossterm::{
+                event::{
+                    self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode,
+                    KeyEventKind,
+                },
+                execute,
+                terminal::{
+                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                },
+            };
+            use tui::{
+                backend::{Backend, CrosstermBackend},
+                layout::{Constraint, Direction, Layout},
+                style::{Color, Style},
+                widgets::{Block, Borders, Paragraph},
+                Terminal,
+            };
+
+            tokio::spawn(async move {
+                let receiver = initialize_channel();
+
+                // Setup terminal
+                enable_raw_mode().unwrap();
+                let mut stdout = io::stdout();
+                execute!(stdout, EnterAlternateScreen, EnableMouseCapture).unwrap();
+                let backend = CrosstermBackend::new(stdout);
+                let mut terminal = Terminal::new(backend).unwrap();
+
+                // Application state
+                let mut input = String::new();
+                // let mut messages: Vec<String> = Vec::new();
+
+                let mut output = String::new();
+
+                // Main loop
+                loop {
+                    for message in receiver.try_iter() {
+                        output.push_str(&message);
+                    }
+                    terminal
+                        .draw(|f| {
+                            // Define the layout with two vertical chunks
+                            let chunks = Layout::default()
+                                .direction(Direction::Vertical)
+                                .margin(0)
+                                .constraints(
+                                    [
+                                        Constraint::Min(1),
+                                        Constraint::Length(3), // Input box height
+                                    ]
+                                    .as_ref(),
+                                )
+                                .split(f.size());
+
+                            // Top Box: Display messages
+                            let output_block = Paragraph::new(output.clone())
+                                .block(Block::default().borders(Borders::ALL).title("Output"));
+                            f.render_widget(output_block, chunks[0]);
+
+                            // Bottom Box: Input area
+                            let input_block = Paragraph::new(input.as_ref())
+                                .style(Style::default().fg(Color::Yellow))
+                                .block(Block::default().borders(Borders::ALL).title("Input"));
+                            f.render_widget(input_block, chunks[1]);
+
+                            // Set cursor position
+                            f.set_cursor(
+                                // Put cursor at the end of the input
+                                chunks[1].x + input.len() as u16 + 1,
+                                chunks[1].y + 1,
+                            )
+                        })
+                        .unwrap();
+
+                    // Poll for events with a timeout
+                    if event::poll(Duration::from_millis(200)).unwrap() {
+                        if let CEvent::Key(key_event) = event::read().unwrap() {
+                            // Filter only Key Press events
+                            if key_event.kind == KeyEventKind::Press {
+                                match key_event.code {
+                                    KeyCode::Char(c) => {
+                                        input.push(c);
+                                    }
+                                    KeyCode::Backspace => {
+                                        input.pop();
+                                    }
+                                    KeyCode::Enter => {
+                                        let trimmed = input.trim().to_string();
+                                        if !trimmed.is_empty() {
+                                            // messages.push(trimmed.clone());
+
+                                            if !output.is_empty()
+                                                && output.chars().last() != Some('\n')
+                                            {
+                                                output.push('\n');
+                                            }
+                                            output.push_str(&trimmed);
+                                            output.push('\n');
+                                            // Here you can send `trimmed` via a channel to other parts of your program
+                                            // For demonstration, we're just adding it to messages
+                                            user_msg_tx.send(trimmed).unwrap();
+                                            input.clear();
+                                        }
+                                    }
+                                    KeyCode::Esc => {
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    // Handle Tick (if any periodic tasks)
+                    // Currently, nothing to do on Tick
+                }
+
+                // Restore terminal
+                disable_raw_mode().unwrap();
+                execute!(
+                    terminal.backend_mut(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture
+                )
+                .unwrap();
+                terminal.show_cursor().unwrap();
             });
 
             // Have this main thread recieve events and send them to the key handler thread
