@@ -389,7 +389,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut ai_content = String::new();
                         let request = CreateChatCompletionRequestArgs::default()
                             // .model("gpt-3.5-turbo")
-                            .model("gpt-4o")
+                            .model(&opt.model)
                             .max_tokens(512u16)
                             .messages(message_history.clone())
                             .functions([

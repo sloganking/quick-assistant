@@ -31,6 +31,13 @@ pub struct Opt {
     #[arg(long)]
     pub ai_voice: Option<VoiceEnum>,
 
+    /// The language model used to generate responses.
+    ///
+    /// You can find the names of more models here.
+    /// https://platform.openai.com/docs/models/
+    #[arg(long, default_value_t = String::from("gpt-4o"))]
+    pub model: String,
+
     #[clap(subcommand)]
     pub subcommands: Option<SubCommands>,
 }
