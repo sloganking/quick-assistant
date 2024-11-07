@@ -5,6 +5,7 @@ use async_openai::types::{
 use dotenvy::dotenv;
 use serde_json::json;
 use std::env;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -45,15 +46,16 @@ use crate::speakstream::speakstream::SpeakStream;
 use once_cell::sync::Lazy;
 use std::sync::mpsc::{self, Receiver, Sender};
 
-// Define a global sender
-static GLOBAL_SENDER: Lazy<Mutex<Sender<String>>> = Lazy::new(|| {
-    let (sender, _receiver) = mpsc::channel::<String>();
+// Define a global sender that can send any type implementing Display
+static GLOBAL_SENDER: Lazy<Mutex<Sender<Box<dyn Display + Send>>>> = Lazy::new(|| {
+    // Initialize with a dummy sender; the actual sender will be set in `initialize_channel`
+    let (sender, _receiver) = mpsc::channel::<Box<dyn Display + Send>>();
     Mutex::new(sender)
 });
 
 // Initialization function to set up the sender and return the receiver
-fn initialize_channel() -> Receiver<String> {
-    let (sender, receiver) = mpsc::channel::<String>();
+fn initialize_channel() -> Receiver<Box<dyn Display + Send>> {
+    let (sender, receiver) = mpsc::channel::<Box<dyn Display + Send>>();
     // Set the global sender
     *GLOBAL_SENDER.lock().unwrap() = sender;
     // Return the receiver for use in the main function or elsewhere
@@ -61,13 +63,16 @@ fn initialize_channel() -> Receiver<String> {
 }
 
 // Function to send a message through the global sender
-fn send_global_message(message: String) -> Result<(), String> {
-    let sender = GLOBAL_SENDER
-        .lock()
-        .map_err(|_| "Failed to acquire lock".to_string())?;
-    sender
-        .send(message)
-        .map_err(|_| "Failed to send message".to_string())
+fn print<T: Display + Send + 'static>(message: T) {
+    let sender = GLOBAL_SENDER.lock().unwrap();
+    // .map_err(|_| "Failed to acquire lock".to_string())?;
+    sender.send(Box::new(message)).unwrap();
+    // .map_err(|_| "Failed to send message".to_string())
+}
+
+fn println<T: Display + Send + 'static>(message: T) {
+    print(message);
+    print("\n");
 }
 
 #[derive(Debug, Subcommand)]
@@ -102,7 +107,7 @@ impl From<VoiceEnum> for Voice {
 }
 
 fn println_error(err: &str) {
-    println!("{}: {}", "Error".truecolor(255, 0, 0), err);
+    println(format!("{}: {}", "Error".truecolor(255, 0, 0), err));
 }
 
 /// Creates a temporary file from a byte slice and returns the path to the file.
@@ -122,7 +127,7 @@ fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
 
 fn set_screen_brightness(brightness: u32) -> Option<()> {
     if brightness > 100 {
-        println!("Brightness must be between 0 and 100");
+        println("Brightness must be between 0 and 100");
         return None;
     }
 
@@ -161,11 +166,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(subcommand) => {
             match subcommand {
                 SubCommands::ShowKeyPresses => {
-                    println!("Press keys to see their codes. Press Ctrl+C to exit. Once you've figured out what key you want to use for push to talk, pass it to easy-tran using the --ptt-key argument. Or pass the number to the --special-ptt-key argument if the key is Unknown(number).");
+                    println("Press keys to see their codes. Press Ctrl+C to exit. Once you've figured out what key you want to use for push to talk, pass it to easy-tran using the --ptt-key argument. Or pass the number to the --special-ptt-key argument if the key is Unknown(number).");
 
                     fn show_keys_callback(event: Event) {
                         if let rdev::EventType::KeyPress(key) = event.event_type {
-                            println!("Key pressed: {:?}", key);
+                            println(format!("Key pressed: {:?}", key));
                         }
                     }
 
@@ -191,7 +196,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 continue;
                             }
                         };
-                        println!("{:?}", device_name);
+                        println(format!("{:?}", device_name));
                     }
                 }
             }
@@ -202,7 +207,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => {
             // Fail if ai_voice_speed out of range
             if opt.speech_speed < 0.5 || opt.speech_speed > 100.0 {
-                println!("Speech speed must be between 0.5 and 100.0");
+                println("Speech speed must be between 0.5 and 100.0");
                 return Ok(());
             }
 
@@ -212,7 +217,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 None => match opt.special_ptt_key {
                     Some(special_ptt_key) => rdev::Key::Unknown(special_ptt_key),
                     None => {
-                        println!("No push to talk key specified. Please pass a key using the --ptt-key argument or the --special-ptt-key argument.");
+                        println("No push to talk key specified. Please pass a key using the --ptt-key argument or the --special-ptt-key argument.");
                         return Ok(());
                     }
                 },
@@ -224,7 +229,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             // Fail if OPENAI_API_KEY is not set
             if env::var("OPENAI_API_KEY").is_err() {
-                println!("OPENAI_API_KEY not set. Please pass your API key as an argument or assign is to the 'OPENAI_API_KEY' env var using terminal or .env file.");
+                println("OPENAI_API_KEY not set. Please pass your API key as an argument or assign is to the 'OPENAI_API_KEY' env var using terminal or .env file.");
                 return Ok(());
             }
 
@@ -382,7 +387,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     if transcription.is_empty() {
-                        println!("No transcription");
+                        println("No transcription");
                         continue;
                     }
 
@@ -454,8 +459,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // }
 
                     let you_string = "You: ".truecolor(0, 255, 0);
-                    println!("{}", "You: ".truecolor(0, 255, 0));
-                    println!("{}", transcription);
+                    println("You: ".truecolor(0, 255, 0));
+                    println(transcription.clone());
 
                     let time_header = format!("Local Time: {}", Local::now());
                     let user_message = time_header + "\n" + &transcription;
@@ -592,7 +597,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         .into(),
                                 );
 
-                                println!();
+                                println("");
 
                                 break 'request;
                             }
@@ -624,11 +629,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                             .parse::<u32>()
                                                             .unwrap();
 
-                                                        println!(
+                                                        println(format!(
                                                             "{}{}",
                                                             "set_screen_brightness: ".purple(),
-                                                            brightness
-                                                        );
+                                                            brightness,
+                                                        ));
 
                                                         if set_screen_brightness(brightness)
                                                             .is_some()
@@ -644,11 +649,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         let media_button =
                                                             args["media_button"].as_str().unwrap();
 
-                                                        println!(
+                                                        println(format!(
                                                             "{}{}",
                                                             "media_controls: ".purple(),
                                                             media_button
-                                                        );
+                                                        ));
 
                                                         match media_button {
                                                             "MediaStop" => {
@@ -694,10 +699,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                 );
                                                             }
                                                             _ => {
-                                                                println!(
+                                                                println(format!(
                                                                     "Unknown media button: {}",
                                                                     media_button
-                                                                );
+                                                                ));
                                                             }
                                                         }
 
@@ -710,11 +715,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         let application =
                                                             args["application"].as_str().unwrap();
 
-                                                        println!(
+                                                        println(format!(
                                                             "{}{}",
                                                             "opening application: ".purple(),
                                                             application
-                                                        );
+                                                        ));
 
                                                         enigo.key_click(enigo::Key::Meta);
                                                         std::thread::sleep(
@@ -729,7 +734,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         None
                                                     }
                                                     _ => {
-                                                        println!("Unknown function: {}", fn_name);
+                                                        println(format!(
+                                                            "Unknown function: {}",
+                                                            fn_name
+                                                        ));
 
                                                         None
                                                     }
@@ -752,11 +760,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             }
                                         } else if let Some(content) = &chat_choice.delta.content {
                                             if !displayed_ai_label {
-                                                println!("{}", "AI: ".truecolor(0, 0, 255));
+                                                println("AI: ".truecolor(0, 0, 255));
                                                 displayed_ai_label = true;
                                             }
 
-                                            print!("{}", content);
+                                            print(format!("{}", content));
                                             ai_content += content;
 
                                             let mut last_non_empty_line_option = None;
@@ -778,7 +786,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 thread_speak_stream_mutex: &Arc<Mutex<SpeakStream>>,
                                             ) {
                                                 *inside_code_block = true;
-                                                // print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
+                                                // print("{}", "inside_code_block = true;".truecolor(255, 0, 255));
                                                 *last_codeblock_line_option = Some(line_num);
 
                                                 // add figure text
@@ -818,7 +826,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                     {
                                                                         inside_code_block = false;
 
-                                                                        // print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
+                                                                        // print("{}", "inside_code_block = false;".truecolor(255, 0, 255));
                                                                         last_codeblock_line_option = Some(line_num);
                                                                     }
                                                                 }
@@ -849,22 +857,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                 }
                                 Err(_err) => {
-                                    println!("error: {_err}");
+                                    println(format!("error: {_err}"));
                                     if !message_history.len() > 1 {
                                         // remove 1 instead of 0 because the first message is a system message
                                         message_history.remove(1);
 
-                                        println!(
+                                        println(format!(
                                             "Removed message. There are now {} remembered messages",
                                             message_history.len()
-                                        );
+                                        ));
                                     }
                                     continue 'request;
                                 }
                             }
                             stdout().flush().unwrap();
                         }
-                        println!();
+                        println("");
 
                         message_history.push(
                             ChatCompletionRequestAssistantMessageArgs::default()
@@ -938,8 +946,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 // Main loop
                 loop {
+                    // for message in receiver.try_iter() {
+                    //     output.push_str(&message);
+                    // }
                     for message in receiver.try_iter() {
-                        output.push_str(&message);
+                        output.push_str(&format!("{}", message));
                     }
                     terminal
                         .draw(|f| {
