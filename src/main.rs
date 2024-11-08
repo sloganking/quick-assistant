@@ -39,12 +39,12 @@ use uuid::Uuid;
 mod easy_rdev_key;
 mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
-use speakstream::speakstream as ss;
+use speakstream::ss;
 mod options;
 use tracing::{debug, error, info, trace, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
-use crate::speakstream::speakstream::SpeakStream;
+use crate::speakstream::ss::SpeakStream;
 
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {

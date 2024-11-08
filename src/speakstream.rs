@@ -1,4 +1,4 @@
-pub mod speakstream {
+pub mod ss {
 
     use anyhow::Context;
     use futures::{future::FutureExt, select};
@@ -11,6 +11,7 @@ pub mod speakstream {
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     use tokio::task;
+    use tracing::debug;
     use tracing::info;
     // use async_openai::{
     //     types::{
@@ -316,6 +317,9 @@ pub mod speakstream {
                                 }))
                                 .await
                                 .unwrap();
+                            debug!(
+                                "Sent text to speech conversion request to the text to speech conversion thread"
+                            );
                         }
                     });
                 }
