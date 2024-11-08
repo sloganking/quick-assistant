@@ -29,6 +29,8 @@ pub mod ss {
     use colored::Colorize;
     use std::time::Duration;
 
+    use crate::truncate;
+
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);
     }
@@ -311,14 +313,16 @@ pub mod ss {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
                             let thread_voice = thread_voice.clone();
+                            let thread_ai_text = ai_text.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
-                                    turn_text_to_speech(ai_text, speech_speed, thread_voice)
+                                    turn_text_to_speech(thread_ai_text, speech_speed, thread_voice)
                                 }))
                                 .await
                                 .unwrap();
+
                             debug!(
-                                "Sent text to speech conversion request to the text to speech conversion thread"
+                                "Sent text-to-speech conversion request to the text to speech conversion thread with text: \"{}\"", truncate(&ai_text, 15)
                             );
                         }
                     });

@@ -77,6 +77,14 @@ impl From<VoiceEnum> for Voice {
     }
 }
 
+fn truncate(s: &str, len: usize) -> String {
+    if s.chars().count() > len {
+        format!("{}...", s.chars().take(len).collect::<String>())
+    } else {
+        s.to_string()
+    }
+}
+
 fn println_error(err: &str) {
     println!("{}: {}", "Error".truecolor(255, 0, 0), err);
     warn!("{}", err);
