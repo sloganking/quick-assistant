@@ -64,15 +64,17 @@ fn initialize_channel() -> Receiver<Box<dyn Display + Send>> {
 
 // Function to send a message through the global sender
 fn print<T: Display + Send + 'static>(message: T) {
-    let sender = GLOBAL_SENDER.lock().unwrap();
-    // .map_err(|_| "Failed to acquire lock".to_string())?;
-    sender.send(Box::new(message)).unwrap();
-    // .map_err(|_| "Failed to send message".to_string())
+    // let sender = GLOBAL_SENDER.lock().unwrap();
+    // // .map_err(|_| "Failed to acquire lock".to_string())?;
+    // sender.send(Box::new(message)).unwrap();
+    // // .map_err(|_| "Failed to send message".to_string())
+    print!("{}", message);
 }
 
 fn println<T: Display + Send + 'static>(message: T) {
-    print(message);
-    print("\n");
+    // print(message);
+    // print("\n");
+    println!("{}", message);
 }
 
 #[derive(Debug, Subcommand)]
@@ -928,118 +930,118 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Terminal,
             };
 
-            tokio::spawn(async move {
-                let receiver = initialize_channel();
+            // tokio::spawn(async move {
+            //     let receiver = initialize_channel();
 
-                // Setup terminal
-                enable_raw_mode().unwrap();
-                let mut stdout = io::stdout();
-                execute!(stdout, EnterAlternateScreen, EnableMouseCapture).unwrap();
-                let backend = CrosstermBackend::new(stdout);
-                let mut terminal = Terminal::new(backend).unwrap();
+            //     // Setup terminal
+            //     enable_raw_mode().unwrap();
+            //     let mut stdout = io::stdout();
+            //     execute!(stdout, EnterAlternateScreen, EnableMouseCapture).unwrap();
+            //     let backend = CrosstermBackend::new(stdout);
+            //     let mut terminal = Terminal::new(backend).unwrap();
 
-                // Application state
-                let mut input = String::new();
-                // let mut messages: Vec<String> = Vec::new();
+            //     // Application state
+            //     let mut input = String::new();
+            //     // let mut messages: Vec<String> = Vec::new();
 
-                let mut output = String::new();
+            //     let mut output = String::new();
 
-                // Main loop
-                loop {
-                    // for message in receiver.try_iter() {
-                    //     output.push_str(&message);
-                    // }
-                    for message in receiver.try_iter() {
-                        output.push_str(&format!("{}", message));
-                    }
-                    terminal
-                        .draw(|f| {
-                            // Define the layout with two vertical chunks
-                            let chunks = Layout::default()
-                                .direction(Direction::Vertical)
-                                .margin(0)
-                                .constraints(
-                                    [
-                                        Constraint::Min(1),
-                                        Constraint::Length(3), // Input box height
-                                    ]
-                                    .as_ref(),
-                                )
-                                .split(f.size());
+            //     // Main loop
+            //     loop {
+            //         // for message in receiver.try_iter() {
+            //         //     output.push_str(&message);
+            //         // }
+            //         for message in receiver.try_iter() {
+            //             output.push_str(&format!("{}", message));
+            //         }
+            //         terminal
+            //             .draw(|f| {
+            //                 // Define the layout with two vertical chunks
+            //                 let chunks = Layout::default()
+            //                     .direction(Direction::Vertical)
+            //                     .margin(0)
+            //                     .constraints(
+            //                         [
+            //                             Constraint::Min(1),
+            //                             Constraint::Length(3), // Input box height
+            //                         ]
+            //                         .as_ref(),
+            //                     )
+            //                     .split(f.size());
 
-                            // Top Box: Display messages
-                            let output_block = Paragraph::new(output.clone())
-                                .block(Block::default().borders(Borders::ALL).title("Output"));
-                            f.render_widget(output_block, chunks[0]);
+            //                 // Top Box: Display messages
+            //                 let output_block = Paragraph::new(output.clone())
+            //                     .block(Block::default().borders(Borders::ALL).title("Output"));
+            //                 f.render_widget(output_block, chunks[0]);
 
-                            // Bottom Box: Input area
-                            let input_block = Paragraph::new(input.as_ref())
-                                .style(Style::default().fg(Color::Yellow))
-                                .block(Block::default().borders(Borders::ALL).title("Input"));
-                            f.render_widget(input_block, chunks[1]);
+            //                 // Bottom Box: Input area
+            //                 let input_block = Paragraph::new(input.as_ref())
+            //                     .style(Style::default().fg(Color::Yellow))
+            //                     .block(Block::default().borders(Borders::ALL).title("Input"));
+            //                 f.render_widget(input_block, chunks[1]);
 
-                            // Set cursor position
-                            f.set_cursor(
-                                // Put cursor at the end of the input
-                                chunks[1].x + input.len() as u16 + 1,
-                                chunks[1].y + 1,
-                            )
-                        })
-                        .unwrap();
+            //                 // Set cursor position
+            //                 f.set_cursor(
+            //                     // Put cursor at the end of the input
+            //                     chunks[1].x + input.len() as u16 + 1,
+            //                     chunks[1].y + 1,
+            //                 )
+            //             })
+            //             .unwrap();
 
-                    // Poll for events with a timeout
-                    if event::poll(Duration::from_millis(200)).unwrap() {
-                        if let CEvent::Key(key_event) = event::read().unwrap() {
-                            // Filter only Key Press events
-                            if key_event.kind == KeyEventKind::Press {
-                                match key_event.code {
-                                    KeyCode::Char(c) => {
-                                        input.push(c);
-                                    }
-                                    KeyCode::Backspace => {
-                                        input.pop();
-                                    }
-                                    KeyCode::Enter => {
-                                        let trimmed = input.trim().to_string();
-                                        if !trimmed.is_empty() {
-                                            // messages.push(trimmed.clone());
+            //         // Poll for events with a timeout
+            //         if event::poll(Duration::from_millis(200)).unwrap() {
+            //             if let CEvent::Key(key_event) = event::read().unwrap() {
+            //                 // Filter only Key Press events
+            //                 if key_event.kind == KeyEventKind::Press {
+            //                     match key_event.code {
+            //                         KeyCode::Char(c) => {
+            //                             input.push(c);
+            //                         }
+            //                         KeyCode::Backspace => {
+            //                             input.pop();
+            //                         }
+            //                         KeyCode::Enter => {
+            //                             let trimmed = input.trim().to_string();
+            //                             if !trimmed.is_empty() {
+            //                                 // messages.push(trimmed.clone());
 
-                                            if !output.is_empty()
-                                                && output.chars().last() != Some('\n')
-                                            {
-                                                output.push('\n');
-                                            }
-                                            output.push_str(&trimmed);
-                                            output.push('\n');
-                                            // Here you can send `trimmed` via a channel to other parts of your program
-                                            // For demonstration, we're just adding it to messages
-                                            user_msg_tx.send(trimmed).unwrap();
-                                            input.clear();
-                                        }
-                                    }
-                                    KeyCode::Esc => {
-                                        break;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
+            //                                 if !output.is_empty()
+            //                                     && output.chars().last() != Some('\n')
+            //                                 {
+            //                                     output.push('\n');
+            //                                 }
+            //                                 output.push_str(&trimmed);
+            //                                 output.push('\n');
+            //                                 // Here you can send `trimmed` via a channel to other parts of your program
+            //                                 // For demonstration, we're just adding it to messages
+            //                                 user_msg_tx.send(trimmed).unwrap();
+            //                                 input.clear();
+            //                             }
+            //                         }
+            //                         KeyCode::Esc => {
+            //                             break;
+            //                         }
+            //                         _ => {}
+            //                     }
+            //                 }
+            //             }
+            //         }
 
-                    // Handle Tick (if any periodic tasks)
-                    // Currently, nothing to do on Tick
-                }
+            //         // Handle Tick (if any periodic tasks)
+            //         // Currently, nothing to do on Tick
+            //     }
 
-                // Restore terminal
-                disable_raw_mode().unwrap();
-                execute!(
-                    terminal.backend_mut(),
-                    LeaveAlternateScreen,
-                    DisableMouseCapture
-                )
-                .unwrap();
-                terminal.show_cursor().unwrap();
-            });
+            //     // Restore terminal
+            //     disable_raw_mode().unwrap();
+            //     execute!(
+            //         terminal.backend_mut(),
+            //         LeaveAlternateScreen,
+            //         DisableMouseCapture
+            //     )
+            //     .unwrap();
+            //     terminal.show_cursor().unwrap();
+            // });
 
             // Have this main thread recieve events and send them to the key handler thread
             {
