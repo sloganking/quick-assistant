@@ -3,7 +3,7 @@ use async_openai::types::{
     ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
 };
 use dotenvy::dotenv;
-use serde_json::json;
+use serde_json::{de, json};
 use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
@@ -77,6 +77,12 @@ impl From<VoiceEnum> for Voice {
     }
 }
 
+fn error_and_panic(s: &str) -> ! {
+    error!("A fatal error occured: {}", s);
+    panic!("{}", s);
+}
+
+/// Truncates a string to a certain length and adds an ellipsis at the end.
 fn truncate(s: &str, len: usize) -> String {
     if s.chars().count() > len {
         format!("{}...", s.chars().take(len).collect::<String>())
@@ -294,7 +300,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
-                                    Ok(_) => debug!("Recording started"),
+                                    Ok(_) => info!("Recording started"),
                                     Err(err) => println_error(&format!(
                                         "Failed to start recording: {:?}",
                                         err
@@ -316,12 +322,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             err
                                         ));
                                         let _ = recorder.stop_recording();
-                                        debug!("Recording stopped");
+                                        info!("Recording stopped");
                                         continue;
                                     }
                                 };
                                 match recorder.stop_recording() {
-                                    Ok(_) => debug!("Recording stopped"),
+                                    Ok(_) => info!("Recording stopped"),
                                     Err(err) => {
                                         println_error(&format!(
                                             "Failed to stop recording: {:?}",
@@ -334,7 +340,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 // Whisper API can't handle less than 0.1 seconds of audio.
                                 // So we'll only transcribe if the recording is longer than 0.2 seconds.
                                 if elapsed.as_secs_f32() < 0.2 {
-                                    println_error("Recording too short");
+                                    println_error("User recording too short. Aborting transctiption and LLM response.");
                                     continue;
                                 };
 
@@ -374,6 +380,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     thread_speak_stream.stop_speech();
                     drop(thread_speak_stream);
 
+                    info!("Transcribing user audio");
                     let transcription_result = match runtime.block_on(future::timeout(
                         Duration::from_secs(10),
                         transcribe::transcribe(&client, &audio_path),
@@ -407,11 +414,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     if transcription.is_empty() {
                         println!("No transcription");
+                        info!("User transcription was empty. Aborting LLM response.");
                         continue;
                     }
 
                     println!("{}", "You: ".truecolor(0, 255, 0));
                     println!("{}", transcription);
+                    info!("User transcription: \"{}\"", truncate(&transcription, 20));
 
                     let time_header = format!("Local Time: {}", Local::now());
                     let user_message = time_header + "\n" + &transcription;
@@ -516,6 +525,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut last_codeblock_line_option: Option<usize> = None;
                         let mut figure_number = 1;
 
+                        debug!("Starting AI response token generation.");
                         while let Some(result) = {
                             match runtime
                                 .block_on(future::timeout(Duration::from_secs(15), stream.next()))
@@ -537,6 +547,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                             if *llm_should_stop {
                                 *llm_should_stop = false;
+
+                                info!("AI response token generation manually stopped.");
 
                                 // remember what the AI said so far.
                                 message_history.push(
@@ -572,6 +584,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                                 let func_response = match fn_name.as_str() {
                                                     "set_screen_brightness" => {
+                                                        info!("Handling set_screen_brightness function call.");
                                                         let args: serde_json::Value =
                                                             serde_json::from_str(&fn_args).unwrap();
                                                         let brightness = args["brightness"]
@@ -595,6 +608,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                         }
                                                     }
                                                     "media_controls" => {
+                                                        info!("Handling media_controls function call.");
                                                         let args: serde_json::Value =
                                                             serde_json::from_str(&fn_args).unwrap();
                                                         let media_button =
@@ -611,16 +625,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                 enigo.key_click(
                                                                     enigo::Key::MediaStop,
                                                                 );
+                                                                info!("MediaStop");
                                                             }
                                                             "MediaNextTrack" => {
                                                                 enigo.key_click(
                                                                     enigo::Key::MediaNextTrack,
                                                                 );
+                                                                info!("MediaNextTrack");
                                                             }
                                                             "MediaPlayPause" => {
                                                                 enigo.key_click(
                                                                     enigo::Key::MediaPlayPause,
                                                                 );
+                                                                info!("MediaPlayPause");
                                                             }
                                                             "MediaPrevTrack" => {
                                                                 enigo.key_click(
@@ -629,6 +646,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                 enigo.key_click(
                                                                     enigo::Key::MediaPrevTrack,
                                                                 );
+                                                                info!("MediaPrevTrack");
                                                             }
                                                             "VolumeUp" => {
                                                                 for _ in 0..5 {
@@ -636,6 +654,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                         enigo::Key::VolumeUp,
                                                                     );
                                                                 }
+                                                                info!("VolumeUp");
                                                             }
                                                             "VolumeDown" => {
                                                                 for _ in 0..5 {
@@ -643,15 +662,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                         enigo::Key::VolumeDown,
                                                                     );
                                                                 }
+                                                                info!("VolumeDown");
                                                             }
                                                             "VolumeMute" => {
                                                                 enigo.key_click(
                                                                     enigo::Key::VolumeMute,
                                                                 );
+                                                                info!("VolumeMute");
                                                             }
                                                             _ => {
                                                                 println!(
                                                                     "Unknown media button: {}",
+                                                                    media_button
+                                                                );
+                                                                warn!(
+                                                                    "AI called unknown media button: {}",
                                                                     media_button
                                                                 );
                                                             }
@@ -661,6 +686,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                     }
 
                                                     "open_application" => {
+                                                        info!("Handling open_application function call.");
                                                         let args: serde_json::Value =
                                                             serde_json::from_str(&fn_args).unwrap();
                                                         let application =
@@ -686,6 +712,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                     }
                                                     _ => {
                                                         println!("Unknown function: {}", fn_name);
+                                                        warn!(
+                                                            "AI called unknown function: {}",
+                                                            fn_name
+                                                        );
 
                                                         None
                                                     }
@@ -806,12 +836,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                                 Err(_err) => {
                                     println!("error: {_err}");
+                                    warn!("OpenAI API response error: {:?}", _err);
                                     if !message_history.len() > 1 {
                                         // remove 1 instead of 0 because the first message is a system message
                                         message_history.remove(1);
 
                                         println!(
-                                            "Removed message. There are now {} remembered messages",
+                                            "Removed message from message history. There are now {} remembered messages",
+                                            message_history.len()
+                                        );
+                                        debug!(
+                                            "Removed message from message history. There are now {} remembered messages",
                                             message_history.len()
                                         );
                                     }
@@ -836,6 +871,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
                     thread_speak_stream.complete_sentence();
                     drop(thread_speak_stream);
+                    debug!("AI token generation complete.");
                 }
             });
 

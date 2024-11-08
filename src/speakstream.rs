@@ -12,6 +12,7 @@ pub mod ss {
     use tempfile::NamedTempFile;
     use tokio::task;
     use tracing::debug;
+    use tracing::error;
     use tracing::info;
     // use async_openai::{
     //     types::{
@@ -29,6 +30,7 @@ pub mod ss {
     use colored::Colorize;
     use std::time::Duration;
 
+    use crate::error_and_panic;
     use crate::truncate;
 
     fn println_error(err: &str) {
@@ -158,15 +160,17 @@ pub mod ss {
         {
             Ok(x) => {
                 if !x.status.success() {
-                    panic!("ffmpeg failed to adjust audio speed");
+                    error_and_panic("ffmpeg failed to adjust audio speed");
                 }
                 x
             }
             Err(err) => {
                 if err.kind() == std::io::ErrorKind::NotFound {
-                    panic!("ffmpeg not found. Please install ffmpeg and add it to your PATH");
+                    error_and_panic(
+                        "ffmpeg not found. Please install ffmpeg and add it to your PATH",
+                    );
                 } else {
-                    panic!("ffmpeg failed to adjust audio speed");
+                    error_and_panic("ffmpeg failed to adjust audio speed");
                 }
             }
         };
@@ -322,7 +326,7 @@ pub mod ss {
                                 .unwrap();
 
                             debug!(
-                                "Sent text-to-speech conversion request to the text to speech conversion thread with text: \"{}\"", truncate(&ai_text, 15)
+                                "Sent text-to-speech conversion request to the text-to-speech conversion thread with text: \"{}\"", truncate(&ai_text, 20)
                             );
                         }
                     });
