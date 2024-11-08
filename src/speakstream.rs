@@ -306,7 +306,6 @@ pub mod speakstream {
 
                 {
                     let converting_tx = converting_tx.clone();
-                    let thread_voice = thread_voice.clone();
                     tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
