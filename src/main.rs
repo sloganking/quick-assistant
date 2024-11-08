@@ -114,8 +114,7 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 async fn main() -> Result<(), Box<dyn Error>> {
     let file_appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
-        .filename_suffix("myapp.log") // log files will have names like "2019-01-01.myapp.log"
-        // ...
+        .filename_suffix("quick-assistant.log")
         .build("./logs/")
         .expect("failed to initialize rolling file appender");
 
