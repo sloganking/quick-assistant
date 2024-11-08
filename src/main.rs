@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
+use tracing_subscriber::filter::FilterFn;
+use tracing_subscriber::Registry;
 mod transcribe;
 use chrono::Local;
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
@@ -39,6 +41,8 @@ mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::speakstream as ss;
 mod options;
+use tracing::{debug, error, info, trace, warn};
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use crate::speakstream::speakstream::SpeakStream;
 
@@ -75,6 +79,7 @@ impl From<VoiceEnum> for Voice {
 
 fn println_error(err: &str) {
     println!("{}: {}", "Error".truecolor(255, 0, 0), err);
+    warn!("{}", err);
 }
 
 /// Creates a temporary file from a byte slice and returns the path to the file.
@@ -107,6 +112,41 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let file_appender = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_suffix("myapp.log") // log files will have names like "2019-01-01.myapp.log"
+        // ...
+        .build("./logs/")
+        .expect("failed to initialize rolling file appender");
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let ouput_library_logs = false;
+    if ouput_library_logs {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(non_blocking)
+            .init();
+    } else {
+        // Define a custom filter function
+        let custom_filter = FilterFn::new(|metadata| {
+            // Allow logs from 'quick_assistant' at DEBUG level and above
+            metadata.target().starts_with("quick_assistant")
+                && metadata.level() <= &tracing::Level::DEBUG
+        });
+        use tracing_subscriber::prelude::*;
+        // Build the subscriber with the custom filter and the non-blocking writer
+        let subscriber = Registry::default()
+            .with(tracing_subscriber::fmt::Layer::default().with_writer(non_blocking))
+            .with(custom_filter);
+
+        // Initialize the subscriber
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("Failed to set global subscriber");
+    }
+
+    info!("Starting up");
+
     let mut enigo = Enigo::new();
 
     let opt = options::Opt::parse();
@@ -247,7 +287,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 recording_start = std::time::SystemTime::now();
                                 match recorder.start_recording(&voice_tmp_path, Some(&opt.device)) {
-                                    Ok(_) => (),
+                                    Ok(_) => debug!("Recording started"),
                                     Err(err) => println_error(&format!(
                                         "Failed to start recording: {:?}",
                                         err
@@ -269,11 +309,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             err
                                         ));
                                         let _ = recorder.stop_recording();
+                                        debug!("Recording stopped");
                                         continue;
                                     }
                                 };
                                 match recorder.stop_recording() {
-                                    Ok(_) => (),
+                                    Ok(_) => debug!("Recording stopped"),
                                     Err(err) => {
                                         println_error(&format!(
                                             "Failed to stop recording: {:?}",

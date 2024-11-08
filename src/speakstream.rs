@@ -11,6 +11,7 @@ pub mod speakstream {
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     use tokio::task;
+    use tracing::info;
     // use async_openai::{
     //     types::{
     //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -387,6 +388,7 @@ pub mod speakstream {
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
                     ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    info!("Playing AI voice audio");
                     // sink.play();
 
                     while stop_speech_rx.try_recv().is_ok() {}

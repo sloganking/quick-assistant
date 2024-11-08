@@ -27,3 +27,6 @@ uuid = { version = "1.6.1", features = ["v4"] }
 slint = "1.4.1"
 slint-build = "1.4.1"
 serde_json = "1.0.114"
+tracing-appender = "0.2.3"
+tracing-subscriber = "0.3.18"
+tracing = "0.1.40"
