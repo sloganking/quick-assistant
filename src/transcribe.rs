@@ -1,3 +1,4 @@
+use crate::error_and_panic;
 use anyhow::{bail, Context};
 use async_openai::{config::OpenAIConfig, types::CreateTranscriptionRequestArgs, Client};
 use std::{
@@ -34,7 +35,7 @@ fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Err
         Ok(x) => x,
         Err(err) => {
             if err.kind() == std::io::ErrorKind::NotFound {
-                panic!("ffmpeg not found. Please install ffmpeg and add it to your PATH");
+                error_and_panic("ffmpeg not found. Please install ffmpeg and add it to your PATH");
             } else {
                 bail!("ffmpeg failed to convert audio");
             }

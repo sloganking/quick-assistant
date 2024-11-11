@@ -1,4 +1,4 @@
-pub mod speakstream {
+pub mod ss {
 
     use anyhow::Context;
     use futures::{future::FutureExt, select};
@@ -11,6 +11,9 @@ pub mod speakstream {
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     use tokio::task;
+    use tracing::debug;
+    use tracing::error;
+    use tracing::info;
     // use async_openai::{
     //     types::{
     //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -26,6 +29,9 @@ pub mod speakstream {
     use async_std::future;
     use colored::Colorize;
     use std::time::Duration;
+
+    use crate::error_and_panic;
+    use crate::truncate;
 
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);
@@ -154,15 +160,17 @@ pub mod speakstream {
         {
             Ok(x) => {
                 if !x.status.success() {
-                    panic!("ffmpeg failed to adjust audio speed");
+                    error_and_panic("ffmpeg failed to adjust audio speed");
                 }
                 x
             }
             Err(err) => {
                 if err.kind() == std::io::ErrorKind::NotFound {
-                    panic!("ffmpeg not found. Please install ffmpeg and add it to your PATH");
+                    error_and_panic(
+                        "ffmpeg not found. Please install ffmpeg and add it to your PATH",
+                    );
                 } else {
-                    panic!("ffmpeg failed to adjust audio speed");
+                    error_and_panic("ffmpeg failed to adjust audio speed");
                 }
             }
         };
@@ -305,17 +313,21 @@ pub mod speakstream {
 
                 {
                     let converting_tx = converting_tx.clone();
-                    let thread_voice = thread_voice.clone();
                     tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
                             let thread_voice = thread_voice.clone();
+                            let thread_ai_text = ai_text.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
-                                    turn_text_to_speech(ai_text, speech_speed, thread_voice)
+                                    turn_text_to_speech(thread_ai_text, speech_speed, thread_voice)
                                 }))
                                 .await
                                 .unwrap();
+
+                            debug!(
+                                "Sent text-to-speech conversion request to the text-to-speech conversion thread with text: \"{}\"", truncate(&ai_text, 20)
+                            );
                         }
                     });
                 }
@@ -387,6 +399,7 @@ pub mod speakstream {
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
                     ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    info!("Playing AI voice audio");
                     // sink.play();
 
                     while stop_speech_rx.try_recv().is_ok() {}
