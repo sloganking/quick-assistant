@@ -126,10 +126,15 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let logs_dir = dirs::cache_dir()
+        .unwrap()
+        .join("quick-assistant")
+        .join("logs");
+    println!("Logs will be stored at: {}", logs_dir.display());
     let file_appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_suffix("quick-assistant.log")
-        .build("./logs/")
+        .build(logs_dir)
         .expect("failed to initialize rolling file appender");
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
