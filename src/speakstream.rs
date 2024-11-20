@@ -230,9 +230,6 @@ pub mod ss {
                     err
                 ));
 
-                // play_audio(&failed_temp_file.path());
-
-                // continue;
                 return None;
             }
         };
