@@ -181,13 +181,13 @@ pub mod ss {
         ai_text: String,
         speed: f32,
         voice: Voice,
-    ) -> Option<NamedTempFile> {
+    ) -> Option<(NamedTempFile, String)> {
         let client = Client::new();
 
         // Turn AI's response into speech
 
         let request = CreateSpeechRequestArgs::default()
-            .input(ai_text)
+            .input(&ai_text)
             .voice(voice.clone())
             .model(SpeechModel::Tts1)
             .build()
@@ -248,10 +248,10 @@ pub mod ss {
                 speed,
             );
 
-            return Some(sped_up_audio_path);
+            Some((sped_up_audio_path, ai_text))
+        } else {
+            Some((ai_speech_segment_tempfile, ai_text))
         }
-
-        Some(ai_speech_segment_tempfile)
     }
 
     fn get_second_to_last_char(s: &str) -> Option<char> {
@@ -266,7 +266,7 @@ pub mod ss {
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
         stop_speech_tx: flume::Sender<()>,
-        ai_audio_playing_rx: flume::Receiver<NamedTempFile>,
+        ai_audio_playing_rx: flume::Receiver<(NamedTempFile, String)>,
     }
 
     impl SpeakStream {
@@ -289,8 +289,8 @@ pub mod ss {
             let _ai_voice_sink = Arc::new(ai_voice_sink);
 
             let (ai_audio_playing_tx, ai_audio_playing_rx): (
-                flume::Sender<NamedTempFile>,
-                flume::Receiver<NamedTempFile>,
+                flume::Sender<(NamedTempFile, String)>,
+                flume::Receiver<(NamedTempFile, String)>,
             ) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
             let (futures_ordered_kill_tx, futures_ordered_kill_rx): (
@@ -347,7 +347,7 @@ pub mod ss {
                         let tempfile_option = handle.await;
 
                         match tempfile_option {
-                            Some(tempfile) => {
+                            Some((tempfile, ai_text)) => {
                                 let mut kill_signal_sent = false;
                                 // Empty the futures ordered queue if the kill channel has received a message
                                 for _ in futures_ordered_kill_rx.try_iter() {
@@ -359,7 +359,7 @@ pub mod ss {
 
                                 if !kill_signal_sent {
                                     // send tempfile to ai voice audio playing thread
-                                    ai_audio_playing_tx.send(tempfile).unwrap();
+                                    ai_audio_playing_tx.send((tempfile, ai_text)).unwrap();
                                 }
                             }
                             None => {
@@ -383,7 +383,7 @@ pub mod ss {
                 let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
                 let mut ai_voice_sink = Arc::new(ai_voice_sink);
 
-                for ai_speech_segment in thread_ai_audio_playing_rx.iter() {
+                for (ai_speech_segment, ai_text) in thread_ai_audio_playing_rx.iter() {
                     // create new stream and sink
                     let (new_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
                     let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
@@ -396,7 +396,8 @@ pub mod ss {
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
                     ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    info!("Playing AI voice audio");
+                    info!("Playing AI voice audio: \"{}\"", truncate(&ai_text, 20));
+
                     // sink.play();
 
                     while stop_speech_rx.try_recv().is_ok() {}
