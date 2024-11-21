@@ -407,6 +407,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         Ok(transcription) => transcription,
                         Err(err) => {
                             println_error(&format!("Failed to transcribe audio: {:?}", err));
+                            play_audio(failed_temp_file.path());
                             continue;
                         }
                     };
