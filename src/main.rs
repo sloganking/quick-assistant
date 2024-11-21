@@ -124,6 +124,97 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
         .map(|_| ())
 }
 
+fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
+    let mut enigo = Enigo::new();
+
+    match fn_name {
+        "set_screen_brightness" => {
+            info!("Handling set_screen_brightness function call.");
+            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let brightness = args["brightness"].as_str().unwrap().parse::<u32>().unwrap();
+
+            println!("{}{}", "set_screen_brightness: ".purple(), brightness);
+
+            if set_screen_brightness(brightness).is_some() {
+                Some("Brightness set".to_string())
+            } else {
+                Some("Failed to set brightness".to_string())
+            }
+        }
+        "media_controls" => {
+            info!("Handling media_controls function call.");
+            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let media_button = args["media_button"].as_str().unwrap();
+
+            println!("{}{}", "media_controls: ".purple(), media_button);
+
+            match media_button {
+                "MediaStop" => {
+                    enigo.key_click(enigo::Key::MediaStop);
+                    info!("MediaStop");
+                }
+                "MediaNextTrack" => {
+                    enigo.key_click(enigo::Key::MediaNextTrack);
+                    info!("MediaNextTrack");
+                }
+                "MediaPlayPause" => {
+                    enigo.key_click(enigo::Key::MediaPlayPause);
+                    info!("MediaPlayPause");
+                }
+                "MediaPrevTrack" => {
+                    enigo.key_click(enigo::Key::MediaPrevTrack);
+                    enigo.key_click(enigo::Key::MediaPrevTrack);
+                    info!("MediaPrevTrack");
+                }
+                "VolumeUp" => {
+                    for _ in 0..5 {
+                        enigo.key_click(enigo::Key::VolumeUp);
+                    }
+                    info!("VolumeUp");
+                }
+                "VolumeDown" => {
+                    for _ in 0..5 {
+                        enigo.key_click(enigo::Key::VolumeDown);
+                    }
+                    info!("VolumeDown");
+                }
+                "VolumeMute" => {
+                    enigo.key_click(enigo::Key::VolumeMute);
+                    info!("VolumeMute");
+                }
+                _ => {
+                    println!("Unknown media button: {}", media_button);
+                    warn!("AI called unknown media button: {}", media_button);
+                }
+            }
+
+            None
+        }
+
+        "open_application" => {
+            info!("Handling open_application function call.");
+            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let application = args["application"].as_str().unwrap();
+
+            println!("{}{}", "opening application: ".purple(), application);
+
+            enigo.key_click(enigo::Key::Meta);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            enigo.key_sequence(application);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            enigo.key_click(enigo::Key::Return);
+
+            None
+        }
+        _ => {
+            println!("Unknown function: {}", fn_name);
+            warn!("AI called unknown function: {}", fn_name);
+
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let logs_dir = dirs::cache_dir()
@@ -164,8 +255,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     info!("Starting up");
-
-    let mut enigo = Enigo::new();
 
     let opt = options::Opt::parse();
     let _ = dotenv();
@@ -586,148 +675,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         }
                                         if let Some(finish_reason) = &chat_choice.finish_reason {
                                             if matches!(finish_reason, FinishReason::FunctionCall) {
-                                                // call_fn(&client, &fn_name, &fn_args).await?;
-
-                                                let func_response = match fn_name.as_str() {
-                                                    "set_screen_brightness" => {
-                                                        info!("Handling set_screen_brightness function call.");
-                                                        let args: serde_json::Value =
-                                                            serde_json::from_str(&fn_args).unwrap();
-                                                        let brightness = args["brightness"]
-                                                            .as_str()
-                                                            .unwrap()
-                                                            .parse::<u32>()
-                                                            .unwrap();
-
-                                                        println!(
-                                                            "{}{}",
-                                                            "set_screen_brightness: ".purple(),
-                                                            brightness
-                                                        );
-
-                                                        if set_screen_brightness(brightness)
-                                                            .is_some()
-                                                        {
-                                                            Some("Brightness set")
-                                                        } else {
-                                                            Some("Failed to set brightness")
-                                                        }
-                                                    }
-                                                    "media_controls" => {
-                                                        info!("Handling media_controls function call.");
-                                                        let args: serde_json::Value =
-                                                            serde_json::from_str(&fn_args).unwrap();
-                                                        let media_button =
-                                                            args["media_button"].as_str().unwrap();
-
-                                                        println!(
-                                                            "{}{}",
-                                                            "media_controls: ".purple(),
-                                                            media_button
-                                                        );
-
-                                                        match media_button {
-                                                            "MediaStop" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaStop,
-                                                                );
-                                                                info!("MediaStop");
-                                                            }
-                                                            "MediaNextTrack" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaNextTrack,
-                                                                );
-                                                                info!("MediaNextTrack");
-                                                            }
-                                                            "MediaPlayPause" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaPlayPause,
-                                                                );
-                                                                info!("MediaPlayPause");
-                                                            }
-                                                            "MediaPrevTrack" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaPrevTrack,
-                                                                );
-                                                                enigo.key_click(
-                                                                    enigo::Key::MediaPrevTrack,
-                                                                );
-                                                                info!("MediaPrevTrack");
-                                                            }
-                                                            "VolumeUp" => {
-                                                                for _ in 0..5 {
-                                                                    enigo.key_click(
-                                                                        enigo::Key::VolumeUp,
-                                                                    );
-                                                                }
-                                                                info!("VolumeUp");
-                                                            }
-                                                            "VolumeDown" => {
-                                                                for _ in 0..5 {
-                                                                    enigo.key_click(
-                                                                        enigo::Key::VolumeDown,
-                                                                    );
-                                                                }
-                                                                info!("VolumeDown");
-                                                            }
-                                                            "VolumeMute" => {
-                                                                enigo.key_click(
-                                                                    enigo::Key::VolumeMute,
-                                                                );
-                                                                info!("VolumeMute");
-                                                            }
-                                                            _ => {
-                                                                println!(
-                                                                    "Unknown media button: {}",
-                                                                    media_button
-                                                                );
-                                                                warn!(
-                                                                    "AI called unknown media button: {}",
-                                                                    media_button
-                                                                );
-                                                            }
-                                                        }
-
-                                                        None
-                                                    }
-
-                                                    "open_application" => {
-                                                        info!("Handling open_application function call.");
-                                                        let args: serde_json::Value =
-                                                            serde_json::from_str(&fn_args).unwrap();
-                                                        let application =
-                                                            args["application"].as_str().unwrap();
-
-                                                        println!(
-                                                            "{}{}",
-                                                            "opening application: ".purple(),
-                                                            application
-                                                        );
-
-                                                        enigo.key_click(enigo::Key::Meta);
-                                                        std::thread::sleep(
-                                                            std::time::Duration::from_millis(500),
-                                                        );
-                                                        enigo.key_sequence(application);
-                                                        std::thread::sleep(
-                                                            std::time::Duration::from_millis(500),
-                                                        );
-                                                        enigo.key_click(enigo::Key::Return);
-
-                                                        None
-                                                    }
-                                                    _ => {
-                                                        println!("Unknown function: {}", fn_name);
-                                                        warn!(
-                                                            "AI called unknown function: {}",
-                                                            fn_name
-                                                        );
-
-                                                        None
-                                                    }
-                                                };
-
-                                                // println!("func_response: \"{:?}\"", func_response);
+                                                let func_response = call_fn(&fn_name, &fn_args);
 
                                                 if let Some(func_response) = func_response {
                                                     message_history.push(
