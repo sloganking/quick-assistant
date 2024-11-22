@@ -2,6 +2,7 @@ use anyhow::Context;
 use async_openai::types::{
     ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
 };
+use core::time;
 use dotenvy::dotenv;
 use serde_json::{de, json};
 use std::env;
@@ -408,18 +409,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 // handle key release
 
                                 // get elapsed time since recording started
-                                let elapsed = match recording_start.elapsed() {
-                                    Ok(elapsed) => elapsed,
+                                let elapsed_option = match recording_start.elapsed() {
+                                    Ok(elapsed) => Some(elapsed),
                                     Err(err) => {
                                         println_error(&format!(
                                             "Failed to get elapsed recording time: {:?}",
                                             err
                                         ));
-                                        let _ = recorder.stop_recording();
-                                        info!("Recording stopped");
-                                        continue;
+                                        None
                                     }
                                 };
+
+                                // stop recording
                                 match recorder.stop_recording() {
                                     Ok(_) => info!("Recording stopped"),
                                     Err(err) => {
@@ -430,6 +431,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         continue;
                                     }
                                 }
+
+                                // continue if we failed to get elapsed time
+                                let elapsed = match elapsed_option {
+                                    Some(elapsed) => elapsed,
+                                    None => {
+                                        continue;
+                                    }
+                                };
 
                                 // Whisper API can't handle less than 0.1 seconds of audio.
                                 // So we'll only transcribe if the recording is longer than 0.2 seconds.
