@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, NamedTempFile};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
 mod transcribe;
@@ -216,8 +217,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn set_up_logging() -> WorkerGuard {
     let logs_dir = dirs::cache_dir()
         .unwrap()
         .join("quick-assistant")
@@ -229,7 +229,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build(logs_dir)
         .expect("failed to initialize rolling file appender");
 
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     let ouput_library_logs = false;
     if ouput_library_logs {
@@ -254,7 +254,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tracing::subscriber::set_global_default(subscriber)
             .expect("Failed to set global subscriber");
     }
+    guard
+}
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let _guard = set_up_logging();
     info!("Starting up");
 
     let opt = options::Opt::parse();
@@ -853,6 +858,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // sink.play();
                 }
             });
+
+            info!("System ready");
 
             // Have this main thread recieve events and send them to the key handler thread
             {
