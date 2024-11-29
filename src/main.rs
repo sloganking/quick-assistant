@@ -36,6 +36,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use rdev::{listen, Event};
 use record::rec;
 use std::error::Error;
+use std::sync::LazyLock;
 use std::time::Duration;
 use uuid::Uuid;
 mod easy_rdev_key;
@@ -208,6 +209,14 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
             None
         }
+
+        "show_logs_folder" => {
+            match open::that(&*LOGS_DIR) {
+                Ok(_) => None, // If unwrap succeeds, return None
+                Err(e) => Some(String::from("Showing logs folder failed with: ") + &e.to_string()), // If unwrap fails, return Some with the error message
+            }
+        }
+
         _ => {
             println!("Unknown function: {}", fn_name);
             warn!("AI called unknown function: {}", fn_name);
@@ -217,12 +226,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
     }
 }
 
-fn set_up_logging() -> WorkerGuard {
-    let logs_dir = dirs::cache_dir()
-        .unwrap()
-        .join("quick-assistant")
-        .join("logs");
-    println!("Logs will be stored at: {}", logs_dir.display());
+fn set_up_logging(logs_dir: &Path) -> WorkerGuard {
     let file_appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_suffix("quick-assistant.log")
@@ -257,9 +261,17 @@ fn set_up_logging() -> WorkerGuard {
     guard
 }
 
+static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    dirs::cache_dir()
+        .unwrap()
+        .join("quick-assistant")
+        .join("logs")
+});
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let _guard = set_up_logging();
+    let _guard = set_up_logging(&LOGS_DIR);
+    println!("Logs will be stored at: {}", LOGS_DIR.display());
     info!("Starting up");
 
     let opt = options::Opt::parse();
@@ -596,7 +608,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         },
                                         "required": ["application"],
                                     }))
-                                    .build().unwrap()
+                                    .build().unwrap(),
+
+                                    ChatCompletionFunctionsArgs::default()
+                                    .name("show_logs_folder")
+                                    .description("Opens this program's logging folder in the default file browser for the user to see.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
                             ])
                             .build()
                             .unwrap();
