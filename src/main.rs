@@ -482,7 +482,6 @@ fn kill_process_by_name(process_name: &str) -> Option<()> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    println!("{}", get_system_processes());
     let _guard = set_up_logging(&LOGS_DIR);
     println!("Logs will be stored at: {}", LOGS_DIR.display());
     info!("Starting up");
