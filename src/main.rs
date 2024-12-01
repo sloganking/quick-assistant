@@ -425,14 +425,19 @@ fn get_system_processes() -> String {
 
     // Display processes ID, name, and disk usage:
     for (pid, process) in sys.processes() {
+        let path_string = match process.exe() {
+            Some(path) => path.to_string_lossy().to_string(),
+            None => "Unknown".to_string(),
+        };
         info.push_str(&format!(
-            "[{}] {:?} start_time: {:?} runtime: {} status: {} cpu_usage: {}\n",
+            "[{}] {:?} start_time: {:?} runtime: {} status: {} cpu_usage: {} directory: {}\n",
             pid,
             process.name(),
             process.start_time(),
             process.run_time(),
             process.status(),
-            process.cpu_usage()
+            process.cpu_usage(),
+            path_string,
         ));
     }
 
@@ -840,7 +845,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("get_system_processes")
-                                    .description("Returns this system's processes with their pid, name, start_time, runtime, status, cpu_usage and other information.")
+                                    .description("Returns this system's processes with their pid, name, start_time, runtime, status, cpu_usage, exe_path and other information.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
