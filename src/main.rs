@@ -220,6 +220,64 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
         "get_system_processes" => Some(get_system_processes()),
 
+        "kill_processes_with_name" => {
+            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let process_name = args["process_name"].as_str().unwrap();
+
+            let process_blacklist = vec![
+                "System", // Core part of the operating system managing hardware and essential system operations.
+                "System Idle Process", // Represents the idle time of the CPU; not a terminable process.
+                "explorer.exe", // Handles the graphical interface like the desktop, taskbar, and file management.
+                "svchost.exe", // Hosts multiple Windows services that are crucial for running background tasks.
+                "winlogon.exe", // Manages user logins and security policies.
+                "csrss.exe", // Handles the user-mode side of the Win32 subsystem, including console windows and threading.
+                "services.exe", // Manages the starting, stopping, and managing of system services.
+                "smss.exe", // Manages session creation and helps in starting essential system processes.
+                "lsass.exe", // Handles security policies and Active Directory management.
+                "dwm.exe",  // Manages display windows and enables visual effects in Windows.
+                "spoolsv.exe", // Manages print and fax jobs.
+                "taskmgr.exe", // Task Manager, used to monitor and manage processes.
+                "RuntimeBroker.exe", // Manages app permissions and runtime permissions.
+                "fontdrvhost.exe", // Handles font drivers.
+                "SearchUI.exe", // Cortana/Search interface.
+                "SearchIndexer.exe", // Indexing service for search functionality.
+                "audiodg.exe", // Audio service.
+                "wmiprvse.exe", // WMI Provider Host.
+                "taskhost.exe", // Generic host for Windows tasks.
+                "taskhostw.exe", // Generic host for Windows tasks (Windows version).
+                "Wininit.exe", // Windows Initialization process.
+                "ShellExperienceHost.exe", // Manages the Windows shell experience.
+                "WUDFHost.exe", // Windows User-Mode Driver Framework Host.
+                "conhost.exe", // Console Window Host.
+                "nvvsvc.exe", // NVIDIA services (if applicable).
+                "igfxTray.exe", // Intel Graphics Tray application (if applicable).
+            ];
+
+            if process_blacklist.contains(&process_name) {
+                println!(
+                    "{}{}",
+                    "Cannot kill system process: ".purple(),
+                    process_name
+                );
+                warn!("AI tried to kill system process: {}", process_name);
+                return Some(format!(
+                    "Cannot kill critical system process: \"{}\" as it is on the blacklist. Inform the user that it's on the blacklist and cannot be killed. ",
+                    process_name
+                ));
+            }
+
+            match kill_process_by_name(process_name) {
+                Some(_) => {
+                    println!("Killed all processes with name: \"{}\"", process_name);
+                    Some(format!("Killed process with name: \"{}\"", process_name))
+                }
+                None => Some(format!(
+                    "Failed to kill processes with name: {}",
+                    process_name
+                )),
+            }
+        }
+
         _ => {
             println!("Unknown function: {}", fn_name);
             warn!("AI called unknown function: {}", fn_name);
@@ -271,7 +329,7 @@ static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("logs")
 });
 
-use sysinfo::{Components, Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Components, Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 fn get_system_info() -> String {
     let mut info = String::new();
@@ -379,6 +437,42 @@ fn get_system_processes() -> String {
     }
 
     info
+}
+
+// fn kill_process(pid: usize) -> Option<String> {
+//     let sys = System::new_all();
+//     // sys.refresh_all();
+
+//     match sys.process(Pid::from(pid)) {
+//         Some(process) => {
+//             if process.kill() {
+//                 Some(process.name().to_string_lossy().to_string())
+//             } else {
+//                 None
+//             }
+//         }
+//         None => None,
+//     }
+// }
+
+fn kill_process_by_name(process_name: &str) -> Option<()> {
+    let sys = System::new_all();
+
+    for (pid, process) in sys.processes() {
+        if process.name().to_string_lossy().to_string() == process_name {
+            if process.kill() {
+                println!(
+                    "Killed process with name: \"{}\" and PID: {}",
+                    process_name, pid
+                );
+                continue;
+            } else {
+                return None;
+            }
+        }
+    }
+
+    Some(())
 }
 
 #[tokio::main]
@@ -746,11 +840,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("get_system_processes")
-                                    .description("Returns this system's processes with their pid, name and other information.")
+                                    .description("Returns this system's processes with their pid, name, start_time, runtime, status, cpu_usage and other information.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("kill_processes_with_name")
+                                    .description("Kills all processes with a given name. ALWAYS call \"get_system_processes\" first to get the name of the process you want to kill.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "process_name": { "type": "string" },
+                                        },
+                                        "required": ["process_name"],
                                     }))
                                     .build().unwrap(),
                             ])
