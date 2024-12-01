@@ -130,6 +130,8 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
     let mut enigo = Enigo::new();
 
+    println!("{}{}", "Invoking function: ".purple(), fn_name);
+
     match fn_name {
         "set_screen_brightness" => {
             info!("Handling set_screen_brightness function call.");
@@ -193,7 +195,6 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
             None
         }
-
         "open_application" => {
             info!("Handling open_application function call.");
             let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
@@ -209,13 +210,13 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
             None
         }
-
         "show_logs_folder" => {
             match open::that(&*LOGS_DIR) {
                 Ok(_) => None, // If unwrap succeeds, return None
                 Err(e) => Some(String::from("Showing logs folder failed with: ") + &e.to_string()), // If unwrap fails, return Some with the error message
             }
         }
+        "sysinfo" => Some(get_system_info()),
 
         _ => {
             println!("Unknown function: {}", fn_name);
@@ -268,8 +269,93 @@ static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("logs")
 });
 
+// use sysinfo::{
+//     ComponentExt, CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt,
+// };
+use sysinfo::{Components, Disks, Networks, System};
+
+// use sysinfo::{Components, Disks, Networks, System};
+
+fn get_system_info() -> String {
+    let mut info = String::new();
+
+    // Create a new System instance
+    let mut sys = System::new_all();
+
+    // Refresh all information
+    sys.refresh_all();
+
+    // Add "=> system:" to info
+    info.push_str("=> system:\n");
+
+    // RAM and swap information:
+    let total_memory = sys.total_memory();
+    let used_memory = sys.used_memory();
+    let total_swap = sys.total_swap();
+    let used_swap = sys.used_swap();
+
+    info.push_str(&format!("total memory: {} bytes\n", total_memory));
+    info.push_str(&format!("used memory : {} bytes\n", used_memory));
+    info.push_str(&format!("total swap  : {} bytes\n", total_swap));
+    info.push_str(&format!("used swap   : {} bytes\n", used_swap));
+
+    // Display system information:
+    let system_name = System::name();
+    let kernel_version = System::kernel_version();
+    let os_version = System::os_version();
+    let host_name = System::host_name();
+
+    info.push_str(&format!("System name:             {:?}\n", system_name));
+    info.push_str(&format!("System kernel version:   {:?}\n", kernel_version));
+    info.push_str(&format!("System OS version:       {:?}\n", os_version));
+    info.push_str(&format!("System host name:        {:?}\n", host_name));
+
+    // Number of CPUs:
+    let nb_cpus = sys.cpus().len();
+    info.push_str(&format!("NB CPUs: {}\n", nb_cpus));
+
+    // // Display processes ID, name, and disk usage:
+    // for (pid, process) in sys.processes() {
+    //     info.push_str(&format!(
+    //         "[{}] {:?} {:?}\n",
+    //         pid,
+    //         process.name(),
+    //         process.disk_usage()
+    //     ));
+    // }
+
+    // Disks information:
+    info.push_str("=> disks:\n");
+    let disks = Disks::new_with_refreshed_list();
+    for disk in &disks {
+        info.push_str(&format!("{:?}\n", disk));
+    }
+
+    // Network interfaces information:
+    info.push_str("=> networks:\n");
+    let networks = Networks::new_with_refreshed_list();
+    for (interface_name, data) in &networks {
+        info.push_str(&format!(
+            "{}: {} B (down) / {} B (up)\n",
+            interface_name,
+            data.total_received(),
+            data.total_transmitted(),
+        ));
+    }
+
+    // Components temperature:
+    info.push_str("=> components:\n");
+    let components = Components::new_with_refreshed_list();
+    for component in &components {
+        info.push_str(&format!("{:?}\n", component));
+    }
+
+    info
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // println!("get_system_info: {}", get_system_info());
     let _guard = set_up_logging(&LOGS_DIR);
     println!("Logs will be stored at: {}", LOGS_DIR.display());
     info!("Starting up");
@@ -610,9 +696,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }))
                                     .build().unwrap(),
 
-                                    ChatCompletionFunctionsArgs::default()
+                                ChatCompletionFunctionsArgs::default()
                                     .name("show_logs_folder")
                                     .description("Opens this program's logging folder in the default file browser for the user to see.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("sysinfo")
+                                    .description("Returns this system's information.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
