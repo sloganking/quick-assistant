@@ -218,6 +218,8 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         }
         "sysinfo" => Some(get_system_info()),
 
+        "get_system_processes" => Some(get_system_processes()),
+
         _ => {
             println!("Unknown function: {}", fn_name);
             warn!("AI called unknown function: {}", fn_name);
@@ -269,12 +271,7 @@ static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("logs")
 });
 
-// use sysinfo::{
-//     ComponentExt, CpuExt, DiskExt, NetworkExt, NetworksExt, ProcessExt, System, SystemExt,
-// };
-use sysinfo::{Components, Disks, Networks, System};
-
-// use sysinfo::{Components, Disks, Networks, System};
+use sysinfo::{Components, Disks, Networks, ProcessRefreshKind, ProcessesToUpdate, System};
 
 fn get_system_info() -> String {
     let mut info = String::new();
@@ -314,16 +311,6 @@ fn get_system_info() -> String {
     let nb_cpus = sys.cpus().len();
     info.push_str(&format!("NB CPUs: {}\n", nb_cpus));
 
-    // // Display processes ID, name, and disk usage:
-    // for (pid, process) in sys.processes() {
-    //     info.push_str(&format!(
-    //         "[{}] {:?} {:?}\n",
-    //         pid,
-    //         process.name(),
-    //         process.disk_usage()
-    //     ));
-    // }
-
     // Disks information:
     info.push_str("=> disks:\n");
     let disks = Disks::new_with_refreshed_list();
@@ -353,9 +340,50 @@ fn get_system_info() -> String {
     info
 }
 
+fn get_system_processes() -> String {
+    let mut info = String::new();
+
+    // Create a new System instance
+    let mut sys = System::new_all();
+
+    // Refresh all information
+    sys.refresh_all();
+
+    // std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+    // // Refresh CPU usage to get actual value.
+    // sys.refresh_processes_specifics(
+    //     ProcessesToUpdate::All,
+    //     true,
+    //     ProcessRefreshKind::new().with_cpu(),
+    // );
+
+    // Add "=> processes:" to info
+    info.push_str("=> processes:\n");
+
+    // // Display system processes:
+    // for (pid, process) in sys.processes() {
+    //     info.push_str(&format!("{:?}\n", process));
+    // }
+
+    // Display processes ID, name, and disk usage:
+    for (pid, process) in sys.processes() {
+        info.push_str(&format!(
+            "[{}] {:?} start_time: {:?} runtime: {} status: {} cpu_usage: {}\n",
+            pid,
+            process.name(),
+            process.start_time(),
+            process.run_time(),
+            process.status(),
+            process.cpu_usage()
+        ));
+    }
+
+    info
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // println!("get_system_info: {}", get_system_info());
+    println!("{}", get_system_processes());
     let _guard = set_up_logging(&LOGS_DIR);
     println!("Logs will be stored at: {}", LOGS_DIR.display());
     info!("Starting up");
@@ -709,6 +737,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("sysinfo")
                                     .description("Returns this system's information.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("get_system_processes")
+                                    .description("Returns this system's processes with their pid, name and other information.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
