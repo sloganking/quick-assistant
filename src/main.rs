@@ -266,13 +266,13 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
                 ));
             }
 
-            match kill_process_by_name(process_name) {
-                Some(_) => {
-                    println!("Killed all processes with name: \"{}\"", process_name);
-                    Some(format!("Killed process with name: \"{}\"", process_name))
-                }
+            match kill_processes_with_name(process_name) {
+                Some(_) => Some(format!(
+                    "Killed all processes with name: \"{}\"",
+                    process_name
+                )),
                 None => Some(format!(
-                    "Failed to kill processes with name: {}",
+                    "Failed to kill all processes with name: {}",
                     process_name
                 )),
             }
@@ -460,24 +460,51 @@ fn get_system_processes() -> String {
 //     }
 // }
 
-fn kill_process_by_name(process_name: &str) -> Option<()> {
+/// returns a list of unique process names on the system.
+fn get_process_names() -> Vec<String> {
     let sys = System::new_all();
+    let mut process_names = Vec::new();
 
+    for (_, process) in sys.processes() {
+        let process_name = process.name().to_string_lossy().to_string();
+
+        if !process_names.contains(&process_name) {
+            process_names.push(process_name);
+        }
+    }
+
+    process_names
+}
+
+fn kill_processes_with_name(process_name: &str) -> Option<()> {
+    // Kill all processes with the given name
+    let mut sys = System::new_all();
     for (pid, process) in sys.processes() {
         if process.name().to_string_lossy().to_string() == process_name {
             if process.kill() {
-                println!(
+                debug!(
                     "Killed process with name: \"{}\" and PID: {}",
                     process_name, pid
                 );
-                continue;
             } else {
-                return None;
+                debug!(
+                    "[Potentially] killed process with name: \"{}\" and PID: {}",
+                    process_name, pid
+                );
             }
         }
     }
 
-    Some(())
+    // sleep for a moment to give the system time to kill the processes
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    // check if all processes with the name were killed
+    sys.refresh_all();
+    if get_process_names().contains(&process_name.to_string()) {
+        return None;
+    } else {
+        return Some(());
+    }
 }
 
 #[tokio::main]
