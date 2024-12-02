@@ -278,6 +278,11 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             }
         }
 
+        "speedtest" => Some(match speedtest() {
+            Ok(answer) => answer,
+            Err(err) => err,
+        }),
+
         _ => {
             println!("Unknown function: {}", fn_name);
             warn!("AI called unknown function: {}", fn_name);
@@ -505,6 +510,23 @@ fn kill_processes_with_name(process_name: &str) -> Option<()> {
     } else {
         return Some(());
     }
+}
+
+fn speedtest() -> Result<String, String> {
+    let output = match Command::new("speedtest-rs").output() {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                return Err(
+                    "speedtest-rs not found. Please install speedtest-rs and add it to your PATH. You can do this by running `cargo install speedtest-rs`".to_string(),
+                );
+            } else {
+                return Err(format!("Failed to run speedtest-rs: {:?}", err));
+            }
+        }
+    };
+
+    Ok(output)
 }
 
 #[tokio::main]
@@ -888,6 +910,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             "process_name": { "type": "string" },
                                         },
                                         "required": ["process_name"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("speedtest")
+                                    .description("Runs an internet speedtest and returns the results.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
                                     }))
                                     .build().unwrap(),
                             ])
