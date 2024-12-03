@@ -7,14 +7,17 @@ use std::{
     process::Command,
 };
 use tempfile::tempdir;
+use tracing::{debug, instrument};
 
 /// Moves audio to mp3.
 /// Ignores output's extension if it is passed one.
 /// Returns the new path.
+#[instrument(skip_all)]
 fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Error> {
     let mut output = PathBuf::from(output);
     output.set_extension("mp3");
 
+    debug!("Running ffmpeg to convert audio to mp3.");
     // `ffmpeg -i input.mp4 -q:a 0 -map a output.mp3`
     let _ = match Command::new("ffmpeg")
         .args([
@@ -34,6 +37,7 @@ fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Err
     {
         Ok(x) => x,
         Err(err) => {
+            debug!("ffmpeg failed to convert audio: {:?}", err);
             if err.kind() == std::io::ErrorKind::NotFound {
                 error_and_panic("ffmpeg not found. Please install ffmpeg and add it to your PATH");
             } else {
@@ -41,10 +45,12 @@ fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Err
             }
         }
     };
+    debug!("ffmpeg succeeded converting audio to mp3.");
 
     Ok(output)
 }
 
+#[instrument(skip_all)]
 pub async fn transcribe(
     client: &Client<OpenAIConfig>,
     input: &Path,
@@ -57,12 +63,15 @@ pub async fn transcribe(
     // Error: ApiError(ApiError { message: "Maximum content size limit (26214400) exceeded (26228340 bytes read)", type: "server_error", param: None, code: None })
     let input_mp3 = if input.extension().unwrap_or_default() != "mp3" {
         // println!("{:?}", tmp_dir.path());
+        debug!("Converting audio to mp3.");
         move_audio_to_mp3(input, &tmp_mp3_path).context("Failed to convert audio to mp3.")?
     } else {
         // println!("{:?}", input);
+        debug!("Audio is already mp3.");
         PathBuf::from(input)
     };
 
+    debug!("creating transcription request.");
     let request = CreateTranscriptionRequestArgs::default()
             .file(input_mp3)
             .model("whisper-1")
@@ -70,6 +79,7 @@ pub async fn transcribe(
             .build()
             .context("Failed to build transcription request.")?;
 
+    debug!("sending transcription request.");
     let response = client
         .audio()
         .transcribe(request)

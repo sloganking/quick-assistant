@@ -44,7 +44,7 @@ mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
 mod options;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use crate::speakstream::ss::SpeakStream;
@@ -127,10 +127,12 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
         .map(|_| ())
 }
 
+#[instrument]
 fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
     let mut enigo = Enigo::new();
 
     println!("{}{}", "Invoking function: ".purple(), fn_name);
+    info!("AI Invoked function: {}", fn_name);
 
     match fn_name {
         "set_screen_brightness" => {
@@ -778,6 +780,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                     };
+                    info!("Finished transcribing user audio");
 
                     let mut transcription = match transcription_result {
                         Ok(transcription) => transcription,
