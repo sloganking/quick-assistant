@@ -5,12 +5,12 @@ use async_openai::types::{
 use core::time;
 use dotenvy::dotenv;
 use serde_json::{de, json};
-use std::env;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::{env, fs};
 use tempfile::{tempdir, NamedTempFile};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
@@ -212,7 +212,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
             None
         }
-        "show_logs_folder" => {
+        "open_logs_folder" => {
             match open::that(&*LOGS_DIR) {
                 Ok(_) => None, // If unwrap succeeds, return None
                 Err(e) => Some(String::from("Showing logs folder failed with: ") + &e.to_string()), // If unwrap fails, return Some with the error message
@@ -284,6 +284,14 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             Ok(answer) => answer,
             Err(err) => err,
         }),
+
+        "show_live_log_stream" => match get_currently_active_log_file() {
+            Some(log_file) => match run_get_content_wait_on_file(&log_file) {
+                Ok(_) => Some("Successfully opened log file in powershell".to_string()),
+                Err(err) => Some(format!("Failed to open log file in powershell: {}", err)),
+            },
+            None => Some("No log files found".to_string()),
+        },
 
         _ => {
             println!("Unknown function: {}", fn_name);
@@ -531,6 +539,43 @@ fn speedtest() -> Result<String, String> {
     Ok(output)
 }
 
+fn get_currently_active_log_file() -> Option<PathBuf> {
+    let mut entries: Vec<_> = fs::read_dir(&*LOGS_DIR)
+        .expect("Failed to read directory")
+        .filter_map(Result::ok)
+        .collect();
+
+    entries.sort_by_key(|entry| entry.file_name());
+
+    if let Some(last) = entries.last() {
+        Some(last.path())
+    } else {
+        None
+    }
+}
+
+fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
+    let file_path_str = match file_path.to_str() {
+        Some(path) => path,
+        None => return Err("Failed to convert file path to string".to_string()),
+    };
+    match Command::new("cmd")
+        .args(&[
+            "/C",
+            "start",
+            "powershell",
+            "-NoExit",
+            "-Command",
+            "Get-Content",
+            &("\"".to_string() + file_path_str + "\""),
+            "-Wait",
+        ])
+        .spawn()
+    {
+        Ok(_) => Ok("Successfully opened file in powershell".to_string()),
+        Err(err) => Err(format!("Failed to open file in powershell: {:?}", err)),
+    }
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let _guard = set_up_logging(&LOGS_DIR);
@@ -875,7 +920,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     .build().unwrap(),
 
                                 ChatCompletionFunctionsArgs::default()
-                                    .name("show_logs_folder")
+                                    .name("open_logs_folder")
                                     .description("Opens this program's logging folder in the default file browser for the user to see.")
                                     .parameters(json!({
                                         "type": "object",
@@ -919,6 +964,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("speedtest")
                                     .description("Runs an internet speedtest and returns the results.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("show_live_log_stream")
+                                    .description("Shows live updates of the log file via opening powershell and running 'Get-Content -Path \"path/to/log/file\" -Wait'.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
