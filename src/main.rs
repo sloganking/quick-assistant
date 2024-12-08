@@ -949,6 +949,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // repeatedly create request until it's answered
                     let mut displayed_ai_label = false;
                     'request: loop {
+                        debug!("Entered chat completion request loop");
                         let mut ai_content = String::new();
                         let request = CreateChatCompletionRequestArgs::default()
                             // .model("gpt-3.5-turbo")
@@ -1107,6 +1108,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 break 'request;
                             }
                         };
+                        debug!("created chat API stream");
 
                         let mut fn_name = String::new();
                         let mut fn_args = String::new();
@@ -1133,6 +1135,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
                         } {
+                            debug!("Got AI API response from stream.next()");
                             let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
 
                             if *llm_should_stop {
