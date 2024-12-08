@@ -3,6 +3,7 @@ use async_openai::types::{
     ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
 };
 use core::time;
+use csv::Writer;
 use dotenvy::dotenv;
 use serde_json::{de, json};
 use std::fs::File;
@@ -12,11 +13,13 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::{env, fs};
 use tempfile::{tempdir, NamedTempFile};
+use timers::*;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
+mod timers;
 mod transcribe;
-use chrono::Local;
+use chrono::{DateTime, Local, Utc};
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
@@ -43,6 +46,7 @@ mod easy_rdev_key;
 mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
+use timers::AudibleTimers;
 mod options;
 use tracing::{debug, error, info, instrument, trace, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -285,6 +289,63 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             Err(err) => err,
         }),
 
+        "set_timer_at" => {
+            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let time_str = args["time"].as_str().unwrap();
+            match time_str.parse::<DateTime<Local>>() {
+                Ok(timestamp) => match set_timer(timestamp) {
+                    Ok(_) => Some("Timer set successfully!".to_string()),
+                    Err(err) => Some(format!("Setting timer failed with error: {}", err)),
+                },
+                Err(err) => Some(format!(
+                    "Setting timer failed. Please enter valid rfc_3339: {}",
+                    err
+                )),
+            }
+        }
+
+        "check_on_timers" => {
+            let timers = get_timers();
+            // construct information string
+            let mut info = String::from("=== Timers ===\n");
+            for timer in timers {
+                let timer_name = &timer.0;
+                let timer_time = timer.1;
+                // calculate time difference
+                let time_diff = timer_time.signed_duration_since(Local::now());
+
+                // Convert to std::time::Duration and handle potential negative durations
+                let duration_std = match time_diff.to_std() {
+                    Ok(dur) => dur,
+                    Err(e) => {
+                        eprintln!("Error converting duration: {}", e);
+                        std::time::Duration::new(0, 0)
+                    }
+                };
+
+                // Truncate the duration to whole seconds
+                let duration_sec = std::time::Duration::new(duration_std.as_secs(), 0);
+
+                // Convert to a human-readable string with second precision
+                let time_diff_str = humantime::format_duration(duration_sec).to_string();
+
+                // // convert to human readable with humantime
+                // let time_diff_str =
+                //     humantime::format_duration(time_diff.to_std().unwrap()).to_string();
+
+                info.push_str(&format!(
+                    "Timer_name: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
+                    timer.0,
+                    timer.1.to_rfc3339(),
+                    time_diff_str,
+                ));
+            }
+
+            println!("{}", info);
+
+            Some(info)
+        }
+      
         "show_live_log_stream" => match get_currently_active_log_file() {
             Some(log_file) => match run_get_content_wait_on_file(&log_file) {
                 Ok(_) => Some("Successfully opened log file in powershell".to_string()),
@@ -343,6 +404,9 @@ static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
         .join("quick-assistant")
         .join("logs")
 });
+
+static CACHE_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| dirs::cache_dir().unwrap().join("quick-assistant"));
 
 use sysinfo::{Components, Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
@@ -693,12 +757,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let key_to_check = ptt_key;
                 let tmp_dir = tempdir().unwrap();
                 let mut voice_tmp_path_option: Option<PathBuf> = None;
+                let alarm_temp_file = create_temp_file_from_bytes(
+                    include_bytes!("../assets/Dreaming of Victory.mp3"),
+                    ".mp3",
+                );
+                let audible_timers = AudibleTimers::new(alarm_temp_file.path().to_path_buf())
+                    .expect("Failed to create audible_timers");
                 for event in key_handler_rx.iter() {
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
                             if key == key_to_check && !key_pressed {
                                 key_pressed = true;
                                 // handle key press
+
+                                // stop any alarms
+                                audible_timers.stop_alarm();
 
                                 // stop the AI voice from speaking
                                 {
@@ -732,6 +805,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if key == key_to_check && key_pressed {
                                 key_pressed = false;
                                 // handle key release
+
+                                // stop any alarms
+                                audible_timers.stop_alarm();
 
                                 // get elapsed time since recording started
                                 let elapsed_option = match recording_start.elapsed() {
@@ -793,7 +869,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 message_history.push(
                     ChatCompletionRequestSystemMessageArgs::default()
-                        .content("You are a desktop voice assistant. The messages you receive from the user are voice transcriptions. Your responses will be spoken out loud by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more'")
+                        .content("You are a desktop voice assistant. The messages you receive from the user are voice transcriptions. Your responses will be spoken out loud by a text to speech engine. You should be helpful but concise. As conversations should be a back and forth. Don't make audio clips that run on for more than 15 seconds. Also don't ask 'if I would like to know more'. If you are told to set a timer, you should always call the \"set_timer_at\" function.")
                         .build()
                         .unwrap()
                         .into(),
@@ -881,8 +957,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .messages(message_history.clone())
                             .functions([
                                 ChatCompletionFunctionsArgs::default()
-                                    .name("set_screen_brightness")
-                                    .description("Sets the brightness of the device's screen.")
+                                .description("Sets the brightness of the device's screen.")
+                                .name("set_screen_brightness")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {
@@ -972,6 +1048,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     .build().unwrap(),
 
                                 ChatCompletionFunctionsArgs::default()
+                                    .name("set_timer_at")
+                                    .description("Sets a timer to go off at a specific time. Pass the time as rfc3339 datetime string. Example: \"2024-12-04T00:44:00-08:00\"")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "time": { "type": "string" },
+                                        },
+                                        "required": ["time"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("check_on_timers")
+                                    .description("Displays all timers that are currently set. The time they are set to go off and the duration remaining until they go off.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+                              
+                              ChatCompletionFunctionsArgs::default()
                                     .name("show_live_log_stream")
                                     .description("Shows live updates of the log file via opening powershell and running 'Get-Content -Path \"path/to/log/file\" -Wait'.")
                                     .parameters(json!({
