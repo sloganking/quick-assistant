@@ -1286,7 +1286,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Err(_err) => {
                                     println!("error: {_err}");
                                     warn!("OpenAI API response error: {:?}", _err);
-                                    if !message_history.len() > 1 {
+                                    if message_history.len() > 1 {
                                         // remove 1 instead of 0 because the first message is a system message
                                         message_history.remove(1);
 
