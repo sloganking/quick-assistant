@@ -294,7 +294,32 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             let time_str = args["time"].as_str().unwrap();
             match time_str.parse::<DateTime<Local>>() {
                 Ok(timestamp) => match set_timer(timestamp) {
-                    Ok(_) => Some("Timer set successfully!".to_string()),
+                    Ok(_) => {
+
+                        let success_response_message = {
+                            // calculate time difference
+                            let time_diff = timestamp.signed_duration_since(Local::now());
+
+                            // Convert to std::time::Duration and handle potential negative durations
+                            let duration_std = match time_diff.to_std() {
+                                Ok(dur) => dur,
+                                Err(e) => {
+                                    eprintln!("Error converting duration: {}", e);
+                                    std::time::Duration::new(0, 0)
+                                }
+                            };
+
+                            // Truncate the duration to whole seconds
+                            let duration_sec = std::time::Duration::new(duration_std.as_secs(), 0);
+
+                            // Convert to a human-readable string with second precision
+                            let time_diff_str = humantime::format_duration(duration_sec).to_string();
+
+                            format!("Successfully set timer to go off at: \"{}\" which is \"{}\" from now.", time_str, time_diff_str)
+                        };
+                        
+                        Some(success_response_message)},
+                
                     Err(err) => Some(format!("Setting timer failed with error: {}", err)),
                 },
                 Err(err) => Some(format!(
@@ -328,10 +353,6 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
                 // Convert to a human-readable string with second precision
                 let time_diff_str = humantime::format_duration(duration_sec).to_string();
-
-                // // convert to human readable with humantime
-                // let time_diff_str =
-                //     humantime::format_duration(time_diff.to_std().unwrap()).to_string();
 
                 info.push_str(&format!(
                     "Timer_name: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
