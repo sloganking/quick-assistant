@@ -304,49 +304,47 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             }
         }
 
-        "check_on_timers" => match get_timers() {
-            Err(err) => Some(format!("Failed to get timers: {}", err)),
-            Ok(timers) => {
-                // construct information string
-                let mut info = String::from("=== Timers ===\n");
-                for timer in timers {
-                    let timer_name = &timer.0;
-                    let timer_time = timer.1;
-                    // calculate time difference
-                    let time_diff = timer_time.signed_duration_since(Local::now());
+        "check_on_timers" => {
+            let timers = get_timers();
+            // construct information string
+            let mut info = String::from("=== Timers ===\n");
+            for timer in timers {
+                let timer_name = &timer.0;
+                let timer_time = timer.1;
+                // calculate time difference
+                let time_diff = timer_time.signed_duration_since(Local::now());
 
-                    // Convert to std::time::Duration and handle potential negative durations
-                    let duration_std = match time_diff.to_std() {
-                        Ok(dur) => dur,
-                        Err(e) => {
-                            eprintln!("Error converting duration: {}", e);
-                            std::time::Duration::new(0, 0)
-                        }
-                    };
+                // Convert to std::time::Duration and handle potential negative durations
+                let duration_std = match time_diff.to_std() {
+                    Ok(dur) => dur,
+                    Err(e) => {
+                        eprintln!("Error converting duration: {}", e);
+                        std::time::Duration::new(0, 0)
+                    }
+                };
 
-                    // Truncate the duration to whole seconds
-                    let duration_sec = std::time::Duration::new(duration_std.as_secs(), 0);
+                // Truncate the duration to whole seconds
+                let duration_sec = std::time::Duration::new(duration_std.as_secs(), 0);
 
-                    // Convert to a human-readable string with second precision
-                    let time_diff_str = humantime::format_duration(duration_sec).to_string();
+                // Convert to a human-readable string with second precision
+                let time_diff_str = humantime::format_duration(duration_sec).to_string();
 
-                    // // convert to human readable with humantime
-                    // let time_diff_str =
-                    //     humantime::format_duration(time_diff.to_std().unwrap()).to_string();
+                // // convert to human readable with humantime
+                // let time_diff_str =
+                //     humantime::format_duration(time_diff.to_std().unwrap()).to_string();
 
-                    info.push_str(&format!(
-                        "Timer_name: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
-                        timer.0,
-                        timer.1.to_rfc3339(),
-                        time_diff_str,
-                    ));
-                }
-
-                println!("{}", info);
-
-                Some(info)
+                info.push_str(&format!(
+                    "Timer_name: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
+                    timer.0,
+                    timer.1.to_rfc3339(),
+                    time_diff_str,
+                ));
             }
-        },
+
+            println!("{}", info);
+
+            Some(info)
+        }
 
         _ => {
             println!("Unknown function: {}", fn_name);
