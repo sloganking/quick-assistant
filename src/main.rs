@@ -899,17 +899,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let mut transcription = match transcription_result {
                         Ok(transcription) => transcription,
                         Err(err) => {
+                            warn!("Failed to transcribe audio");
+
                             println_error(&format!("Failed to transcribe audio: {:?}", err));
                             play_audio(failed_temp_file.path());
                             continue;
                         }
                     };
 
+                    debug!("Got transcription out of result: \"{}\"", truncate(&transcription, 20));
+
                     if let Some(last_char) = transcription.chars().last() {
+                        debug!("Last char of transcription: \"{}\"", last_char);
                         if ['.', '?', '!', ','].contains(&last_char) {
+                            debug!("Last char is punctuation. Adding space.");
                             transcription.push(' ');
                         }
                     }
+
+                    debug!("Transcription after potentially adding space: \"{}\"", truncate(&transcription, 20));
 
                     if transcription.is_empty() {
                         println!("No transcription");
