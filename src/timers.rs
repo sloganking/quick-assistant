@@ -1,5 +1,5 @@
 use anyhow::Context;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use csv::Reader;
 use flume;
 use rodio;
@@ -13,7 +13,7 @@ use tracing::warn;
 
 use crate::CACHE_DIR;
 
-// Global lazy-initialized in-memory timers storage
+// Global lazy-initialized in-memory timers storage.
 static TIMERS: LazyLock<RwLock<Vec<(String, DateTime<Local>)>>> = LazyLock::new(|| {
     let path = CACHE_DIR.join("timers.csv");
     let timers = load_timers_from_disk(&path).expect("Failed to load timers");
@@ -23,7 +23,7 @@ static TIMERS: LazyLock<RwLock<Vec<(String, DateTime<Local>)>>> = LazyLock::new(
 fn load_timers_from_disk(path: &Path) -> Result<Vec<(String, DateTime<Local>)>, anyhow::Error> {
     if !path.is_file() {
         let mut wtr = csv::Writer::from_path(path)?;
-        wtr.write_record(&["name", "timestamp"])?;
+        wtr.write_record(&["description", "timestamp"])?;
         wtr.flush()?;
         return Ok(vec![]);
     }
@@ -32,9 +32,9 @@ fn load_timers_from_disk(path: &Path) -> Result<Vec<(String, DateTime<Local>)>, 
     let mut records = Vec::new();
     for result in rdr.records() {
         let record = result?;
-        let name = &record[0];
+        let description = &record[0];
         let timestamp: DateTime<Local> = record[1].parse()?;
-        records.push((name.to_string(), timestamp));
+        records.push((description.to_string(), timestamp));
     }
 
     Ok(records)
@@ -43,9 +43,9 @@ fn load_timers_from_disk(path: &Path) -> Result<Vec<(String, DateTime<Local>)>, 
 fn save_timers_to_disk(path: &Path) -> Result<(), anyhow::Error> {
     let timers = TIMERS.read().unwrap();
     let mut wtr = csv::Writer::from_path(path)?;
-    wtr.write_record(&["name", "timestamp"])?;
-    for (name, timestamp) in timers.iter() {
-        wtr.write_record(&[name, &timestamp.to_rfc3339()])?;
+    wtr.write_record(&["description", "timestamp"])?;
+    for (description, timestamp) in timers.iter() {
+        wtr.write_record(&[description, &timestamp.to_rfc3339()])?;
     }
     wtr.flush()?;
     Ok(())
@@ -57,11 +57,11 @@ pub fn get_timers() -> Vec<(String, DateTime<Local>)> {
     timers.clone()
 }
 
-// Public API for adding a timer
-pub fn set_timer(timer_time: DateTime<Local>) -> Result<(), anyhow::Error> {
+// Public API for adding a timer with a description
+pub fn set_timer(description: String, timer_time: DateTime<Local>) -> Result<(), anyhow::Error> {
     {
         let mut timers = TIMERS.write().unwrap();
-        timers.push(("New Timer".to_string(), timer_time));
+        timers.push((description, timer_time));
     }
     // Save to disk after modification if desired
     save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
@@ -72,10 +72,10 @@ pub fn check_timers() -> Result<Vec<(String, DateTime<Local>)>, anyhow::Error> {
     let mut expired_timers = Vec::new();
     {
         let mut timers = TIMERS.write().unwrap();
-        timers.retain(|(name, timestamp)| {
+        timers.retain(|(description, timestamp)| {
             let now_local = Local::now();
             if *timestamp <= now_local {
-                expired_timers.push((name.clone(), *timestamp));
+                expired_timers.push((description.clone(), *timestamp));
                 false
             } else {
                 true
@@ -119,7 +119,6 @@ impl AudibleTimers {
                 };
 
                 if !expired_timers.is_empty() {
-                    // Label the outer alarm loop so we can break out of it directly
                     'alarm_loop: loop {
                         sink.stop(); // Clear any previous sound
                         let file = match std::fs::File::open(&audio_file) {
@@ -142,9 +141,6 @@ impl AudibleTimers {
 
                             // Check if sound finished
                             if sink.empty() {
-                                // Sound finished playing naturally. If you want continuous replay until stopped,
-                                // just `break` to restart from the outer loop. If you only want to play once per
-                                // expired timer batch, `break 'alarm_loop;` instead.
                                 break;
                             }
 

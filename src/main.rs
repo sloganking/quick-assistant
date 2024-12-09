@@ -292,8 +292,9 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         "set_timer_at" => {
             let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
             let time_str = args["time"].as_str().unwrap();
+            let description = args["description"].as_str().unwrap_or_default();
             match time_str.parse::<DateTime<Local>>() {
-                Ok(timestamp) => match set_timer(timestamp) {
+                Ok(timestamp) => match set_timer(description.to_string(), timestamp) {
                     Ok(_) => {
 
                         let success_response_message = {
@@ -355,7 +356,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
                 let time_diff_str = humantime::format_duration(duration_sec).to_string();
 
                 info.push_str(&format!(
-                    "Timer_name: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
+                    "Timer_description: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
                     timer.0,
                     timer.1.to_rfc3339(),
                     time_diff_str,
@@ -1051,11 +1052,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("set_timer_at")
-                                    .description("Sets a timer to go off at a specific time. Pass the time as rfc3339 datetime string. Example: \"2024-12-04T00:44:00-08:00\"")
+                                    .description("Sets a timer to go off at a specific time. Pass the time as rfc3339 datetime string. Example: \"2024-12-04T00:44:00-08:00\". The description field is optional, add descriptions that will tell you what to remind the user to do, if anything, after the timer goes off.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {
                                             "time": { "type": "string" },
+                                            "description": { "type": "string" },
                                         },
                                         "required": ["time"],
                                     }))
