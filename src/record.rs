@@ -11,49 +11,16 @@ pub mod rec {
     use std::path::Path;
     use std::sync::{Arc, Mutex};
 
-    // #[derive(Parser, Debug)]
-    // #[command(version, about = "CPAL record_wav example", long_about = None)]
-    // struct Opt {
-    //     /// The audio device to use
-    //     #[arg(short, long, default_value_t = String::from("default"))]
-    //     device: String,
-
-    //     /// Use the JACK host
-    //     #[cfg(all(
-    //         any(
-    //             target_os = "linux",
-    //             target_os = "dragonfly",
-    //             target_os = "freebsd",
-    //             target_os = "netbsd"
-    //         ),
-    //         feature = "jack"
-    //     ))]
-    //     #[arg(short, long)]
-    //     #[allow(dead_code)]
-    //     jack: bool,
-    // }
-
     pub struct Recorder {
         #[allow(clippy::type_complexity)]
         utils: Option<(Arc<Mutex<Option<WavWriter<BufWriter<File>>>>>, cpal::Stream)>,
     }
 
     impl Recorder {
-        // #[no_panic]
         pub fn new() -> Self {
             Recorder { utils: None }
         }
 
-        // #[no_panic]
-        // pub fn start_recording_test(&mut self) -> Result<(), anyhow::Error> {
-        //     if self.utils.is_some() {
-        //         bail!("Attempted to start recording when already recording!")
-        //     }
-
-        //     Ok(())
-        // }
-
-        // #[no_panic]
         pub fn start_recording(
             &mut self,
             save_location: &Path,
@@ -65,41 +32,6 @@ pub mod rec {
 
             let device = device.unwrap_or("default");
 
-            // ========================
-            // let opt = Opt::parse();
-
-            // // Conditionally compile with jack if the feature is specified.
-            // #[cfg(all(
-            //     any(
-            //         target_os = "linux",
-            //         target_os = "dragonfly",
-            //         target_os = "freebsd",
-            //         target_os = "netbsd"
-            //     ),
-            //     feature = "jack"
-            // ))]
-            // // Manually check for flags. Can be passed through cargo with -- e.g.
-            // // cargo run --release --example beep --features jack -- --jack
-            // let host = if opt.jack {
-            //     cpal::host_from_id(cpal::available_hosts()
-            //         .into_iter()
-            //         .find(|id| *id == cpal::HostId::Jack)
-            //         .expect(
-            //             "make sure --features jack is specified. only works on OSes where jack is available",
-            //         )).expect("jack host unavailable")
-            // } else {
-            //     cpal::default_host()
-            // };
-
-            // #[cfg(any(
-            //     not(any(
-            //         target_os = "linux",
-            //         target_os = "dragonfly",
-            //         target_os = "freebsd",
-            //         target_os = "netbsd"
-            //     )),
-            //     not(feature = "jack")
-            // ))]
             let host = cpal::default_host();
 
             // Set up the input device and stream with the default input config.
@@ -117,7 +49,6 @@ pub mod rec {
             };
 
             match device.name() {
-                // Ok(name) => println!("Input device: {}", name),
                 Ok(_name) => {}
                 Err(e) => println!("Failed to get device name: {}", e),
             }
@@ -126,16 +57,11 @@ pub mod rec {
                 .default_input_config()
                 .context("Failed to get default input config")?;
 
-            // println!("Default input config: {:?}", config);
-
             // The WAV file we're recording to.
             let spec = wav_spec_from_config(&config);
             let writer = hound::WavWriter::create(save_location, spec)
                 .context("Failed to create WAV writer")?;
             let writer = Arc::new(Mutex::new(Some(writer)));
-
-            // A flag to indicate that recording is in progress.
-            // println!("Begin recording...");
 
             // Run the input stream on a separate thread.
             let writer_2 = writer.clone();
@@ -181,7 +107,6 @@ pub mod rec {
                     bail!(format!("Unsupported sample format '{sample_format}'"))
                 }
             };
-            // ========================
 
             stream.play().context("Failed to play stream")?;
             self.utils = Some((writer, stream));
@@ -191,7 +116,6 @@ pub mod rec {
             match self.utils.take() {
                 Some((writer, stream)) => {
                     stream.pause().context("Failed to pause stream")?;
-                    // writer.lock().unwrap().take().unwrap().finalize().unwrap();
                     // Here's your modified match statement
                     match writer.lock() {
                         Ok(mut guard) => {

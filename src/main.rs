@@ -507,21 +507,9 @@ fn get_system_processes() -> String {
     // Refresh all information
     sys.refresh_all();
 
-    // std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
-    // // Refresh CPU usage to get actual value.
-    // sys.refresh_processes_specifics(
-    //     ProcessesToUpdate::All,
-    //     true,
-    //     ProcessRefreshKind::new().with_cpu(),
-    // );
-
     // Add "=> processes:" to info
     info.push_str("=> processes:\n");
 
-    // // Display system processes:
-    // for (pid, process) in sys.processes() {
-    //     info.push_str(&format!("{:?}\n", process));
-    // }
 
     // Display processes ID, name, and disk usage:
     for (pid, process) in sys.processes() {
@@ -543,22 +531,6 @@ fn get_system_processes() -> String {
 
     info
 }
-
-// fn kill_process(pid: usize) -> Option<String> {
-//     let sys = System::new_all();
-//     // sys.refresh_all();
-
-//     match sys.process(Pid::from(pid)) {
-//         Some(process) => {
-//             if process.kill() {
-//                 Some(process.name().to_string_lossy().to_string())
-//             } else {
-//                 None
-//             }
-//         }
-//         None => None,
-//     }
-// }
 
 /// returns a list of unique process names on the system.
 fn get_process_names() -> Vec<String> {

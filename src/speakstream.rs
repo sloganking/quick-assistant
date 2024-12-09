@@ -1,6 +1,12 @@
 pub mod ss {
 
     use anyhow::Context;
+    use async_openai::{
+        types::{CreateSpeechRequestArgs, SpeechModel, Voice},
+        Client,
+    };
+    use async_std::future;
+    use colored::Colorize;
     use futures::{future::FutureExt, select};
     use rodio::OutputStream;
     use std::io::BufReader;
@@ -8,27 +14,13 @@ pub mod ss {
     use std::process::Command;
     use std::sync::Arc;
     use std::thread;
+    use std::time::Duration;
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     use tokio::task;
     use tracing::debug;
     use tracing::error;
     use tracing::info;
-    // use async_openai::{
-    //     types::{
-    //         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-    //         ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    //         CreateChatCompletionRequestArgs, CreateSpeechRequestArgs, SpeechModel, Voice,
-    //     },
-    //     Client,
-    // };
-    use async_openai::{
-        types::{CreateSpeechRequestArgs, SpeechModel, Voice},
-        Client,
-    };
-    use async_std::future;
-    use colored::Colorize;
-    use std::time::Duration;
 
     use crate::error_and_panic;
     use crate::truncate;
