@@ -335,8 +335,8 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             // construct information string
             let mut info = String::from("=== Timers ===\n");
             for timer in timers {
-                let timer_name = &timer.0;
-                let timer_time = timer.1;
+                // let timer_name = &timer.1;
+                let timer_time = timer.2;
                 // calculate time difference
                 let time_diff = timer_time.signed_duration_since(Local::now());
 
@@ -356,9 +356,10 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
                 let time_diff_str = humantime::format_duration(duration_sec).to_string();
 
                 info.push_str(&format!(
-                    "Timer_description: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
+                    "Timer_ID: \"{}\" Timer_description: \"{}\" goes off at time: \"{}\" which is \"{}\" from now.\n",
                     timer.0,
-                    timer.1.to_rfc3339(),
+                    timer.1,
+                    timer.2.to_rfc3339(),
                     time_diff_str,
                 ));
             }
@@ -366,6 +367,16 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             println!("{}", info);
 
             Some(info)
+        }
+
+        "delete_timer_by_id" => {
+            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let timer_id = args["timer_id"].as_u64().unwrap();
+
+            match delete_timer(timer_id) {
+                Ok(_) => Some(format!("Successfully deleted timer with ID: {}", timer_id)),
+                Err(err) => Some(format!("Failed to delete timer with ID: {}. Error: {}", timer_id, err)),
+            }
         }
       
         "show_live_log_stream" => match get_currently_active_log_file() {
@@ -1077,6 +1088,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": [],
                                     }))
                                     .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("delete_timer_by_id")
+                                    .description("Deletes a timer by it's ID. Pass the ID of the timer you want to delete. To get the ID of a timer, call the \"check_on_timers\" function.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "timer_id": { "type": "integer" },
+                                        },
+                                        "required": ["timer_id"],
+                                    }))
+                                    .build().unwrap(),
+                                    
                               
                               ChatCompletionFunctionsArgs::default()
                                     .name("show_live_log_stream")
