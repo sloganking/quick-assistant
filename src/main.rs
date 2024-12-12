@@ -924,9 +924,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         println!("No transcription");
                         info!("User transcription was empty. Aborting LLM response.");
                         continue;
+                    } else {
+                        debug!("User transcription was not empty. Continuing with LLM response.");
                     }
 
+                    debug!("BEFORE print truecolor");
                     println!("{}", "You: ".truecolor(0, 255, 0));
+                    debug!("AFTER print truecolor");
+                    
                     println!("{}", transcription);
                     info!("User transcription: \"{}\"", truncate(&transcription, 20));
 
