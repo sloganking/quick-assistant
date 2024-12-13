@@ -18,15 +18,16 @@ pub mod ss {
     use tempfile::Builder;
     use tempfile::NamedTempFile;
     use tokio::task;
-    use tracing::debug;
     use tracing::error;
     use tracing::info;
+    use tracing::{debug, warn};
 
     use crate::error_and_panic;
     use crate::truncate;
 
     fn println_error(err: &str) {
         println!("{}: {}", "Error".truecolor(255, 0, 0), err);
+        warn!("{}", err);
     }
 
     /// SentenceAccumulator is a struct that accumulates tokens into sentences
