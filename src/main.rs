@@ -2,6 +2,7 @@ use anyhow::Context;
 use async_openai::types::{
     ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
 };
+use clipboard::{ClipboardContext, ClipboardProvider};
 use core::time;
 use csv::Writer;
 use dotenvy::dotenv;
@@ -386,6 +387,33 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             },
             None => Some("No log files found".to_string()),
         },
+
+        "set_clipboard" => {
+            // Try to parse the JSON arguments
+            let args = match serde_json::from_str::<serde_json::Value>(&fn_args) {
+                Ok(json) => json,
+                Err(e) => return Some(format!("Failed to parse arguments: {}", e)),
+            };
+
+            // Extract the clipboard text
+            let clipboard_text = match args["clipboard_text"].as_str() {
+                Some(text) => text,
+                None => return Some("Missing 'clipboard_text' argument.".to_string()),
+            };
+
+            // Attempt to create a clipboard context
+            let mut clipboard: ClipboardContext = match ClipboardProvider::new() {
+                Ok(c) => c,
+                Err(e) => return Some(format!("Failed to initialize clipboard: {}", e)),
+            };
+
+            // Try to set the clipboard contents
+            match clipboard.set_contents(clipboard_text.to_string()) {
+                Ok(_) => Some("Clipboard set successfully.".to_string()),
+                Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
+            }
+        }
+
 
         _ => {
             println!("Unknown function: {}", fn_name);
@@ -1109,6 +1137,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("set_clipboard")
+                                    .description("Sets the clipboard to the given text.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "clipboard_text": { "type": "string" },
+                                        },
+                                        "required": ["clipboard_text"],
                                     }))
                                     .build().unwrap(),
                             ])
