@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::bail;
 use chrono::{DateTime, Local};
 use csv::Reader;
 use flume;
@@ -87,18 +87,21 @@ pub fn set_timer(description: String, timer_time: DateTime<Local>) -> Result<(),
 
 // Public API for deleting a timer by ID
 pub fn delete_timer(id: u64) -> Result<(), anyhow::Error> {
+    let original_count;
+    let new_count;
     {
         let mut timers = TIMERS.write().unwrap();
-        let original_count = timers.len();
+        original_count = timers.len();
         timers.retain(|(t_id, _, _)| *t_id != id);
-
-        if timers.len() == original_count {
-            // No timer with that ID was found
-            warn!("No timer found with ID: {}", id);
-        }
+        new_count = timers.len();
     }
-    // Save to disk after modification
-    save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
+
+    if new_count != original_count {
+        save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
+    } else {
+        bail!("Timer with ID {} not found", id);
+    }
+
     Ok(())
 }
 
