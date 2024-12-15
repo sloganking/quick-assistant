@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::bail;
 use chrono::{DateTime, Local};
 use csv::Reader;
 use flume;
@@ -6,83 +6,122 @@ use rodio;
 use std::{
     io::BufReader,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock, RwLock}, // Use LazyLock from std
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, LazyLock, RwLock,
+    }, // Use LazyLock from std
     thread,
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::CACHE_DIR;
 
+// Global atomic ID counter for timers
+static NEXT_ID: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(1));
+
 // Global lazy-initialized in-memory timers storage.
-static TIMERS: LazyLock<RwLock<Vec<(String, DateTime<Local>)>>> = LazyLock::new(|| {
+// Now we store (id, description, timestamp)
+static TIMERS: LazyLock<RwLock<Vec<(u64, String, DateTime<Local>)>>> = LazyLock::new(|| {
     let path = CACHE_DIR.join("timers.csv");
     let timers = load_timers_from_disk(&path).expect("Failed to load timers");
     RwLock::new(timers)
 });
 
-fn load_timers_from_disk(path: &Path) -> Result<Vec<(String, DateTime<Local>)>, anyhow::Error> {
+fn load_timers_from_disk(
+    path: &Path,
+) -> Result<Vec<(u64, String, DateTime<Local>)>, anyhow::Error> {
     if !path.is_file() {
         let mut wtr = csv::Writer::from_path(path)?;
-        wtr.write_record(&["description", "timestamp"])?;
+        wtr.write_record(&["id", "description", "timestamp"])?;
         wtr.flush()?;
         return Ok(vec![]);
     }
 
     let mut rdr = Reader::from_path(path)?;
     let mut records = Vec::new();
+    let mut max_id = 0;
     for result in rdr.records() {
         let record = result?;
-        let description = &record[0];
-        let timestamp: DateTime<Local> = record[1].parse()?;
-        records.push((description.to_string(), timestamp));
+        let id: u64 = record[0].parse()?;
+        let description = &record[1];
+        let timestamp: DateTime<Local> = record[2].parse()?;
+        if id > max_id {
+            max_id = id;
+        }
+        records.push((id, description.to_string(), timestamp));
     }
 
+    // Set NEXT_ID to one more than the max ID found
+    NEXT_ID.store(max_id + 1, Ordering::Relaxed);
     Ok(records)
 }
 
 fn save_timers_to_disk(path: &Path) -> Result<(), anyhow::Error> {
     let timers = TIMERS.read().unwrap();
     let mut wtr = csv::Writer::from_path(path)?;
-    wtr.write_record(&["description", "timestamp"])?;
-    for (description, timestamp) in timers.iter() {
-        wtr.write_record(&[description, &timestamp.to_rfc3339()])?;
+    wtr.write_record(&["id", "description", "timestamp"])?;
+    for (id, description, timestamp) in timers.iter() {
+        wtr.write_record(&[&id.to_string(), description, &timestamp.to_rfc3339()])?;
     }
     wtr.flush()?;
     Ok(())
 }
 
 // Public API for reading timers from memory
-pub fn get_timers() -> Vec<(String, DateTime<Local>)> {
+pub fn get_timers() -> Vec<(u64, String, DateTime<Local>)> {
     let timers = TIMERS.read().unwrap();
     timers.clone()
 }
 
 // Public API for adding a timer with a description
 pub fn set_timer(description: String, timer_time: DateTime<Local>) -> Result<(), anyhow::Error> {
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     {
         let mut timers = TIMERS.write().unwrap();
-        timers.push((description, timer_time));
+        timers.push((id, description, timer_time));
     }
     // Save to disk after modification if desired
     save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
     Ok(())
 }
 
-pub fn check_timers() -> Result<Vec<(String, DateTime<Local>)>, anyhow::Error> {
+// Public API for deleting a timer by ID
+pub fn delete_timer(id: u64) -> Result<(), anyhow::Error> {
+    let original_count;
+    let new_count;
+    {
+        let mut timers = TIMERS.write().unwrap();
+        original_count = timers.len();
+        timers.retain(|(t_id, _, _)| *t_id != id);
+        new_count = timers.len();
+    }
+
+    if new_count != original_count {
+        save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
+    } else {
+        bail!("Timer with ID {} not found", id);
+    }
+
+    Ok(())
+}
+
+pub fn check_timers() -> Result<Vec<(u64, String, DateTime<Local>)>, anyhow::Error> {
     let mut expired_timers = Vec::new();
     {
         let mut timers = TIMERS.write().unwrap();
-        timers.retain(|(description, timestamp)| {
+        timers.retain(|(id, description, timestamp)| {
             let now_local = Local::now();
             if *timestamp <= now_local {
-                expired_timers.push((description.clone(), *timestamp));
+                expired_timers.push((*id, description.clone(), *timestamp));
                 false
             } else {
                 true
             }
         });
     }
-    save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
+    if !expired_timers.is_empty() {
+        save_timers_to_disk(&CACHE_DIR.join("timers.csv"))?;
+    }
     Ok(expired_timers)
 }
 
@@ -119,6 +158,16 @@ impl AudibleTimers {
                 };
 
                 if !expired_timers.is_empty() {
+                    // You could handle the expired timers here (log them, pass them to your AI, etc.)
+                    for (id, description, timestamp) in &expired_timers {
+                        info!(
+                            "Timer expired (ID: {}): description: \"{}\", time: {}",
+                            id,
+                            description,
+                            &timestamp.to_rfc3339()
+                        );
+                    }
+
                     'alarm_loop: loop {
                         sink.stop(); // Clear any previous sound
                         let file = match std::fs::File::open(&audio_file) {
