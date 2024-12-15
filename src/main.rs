@@ -3,10 +3,8 @@ use async_openai::types::{
     ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
 };
 use clipboard::{ClipboardContext, ClipboardProvider};
-use core::time;
-use csv::Writer;
 use dotenvy::dotenv;
-use serde_json::{de, json};
+use serde_json::json;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -20,7 +18,7 @@ use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
 mod timers;
 mod transcribe;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
@@ -49,7 +47,7 @@ use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
 use timers::AudibleTimers;
 mod options;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use crate::speakstream::ss::SpeakStream;
@@ -142,7 +140,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
     match fn_name {
         "set_screen_brightness" => {
             info!("Handling set_screen_brightness function call.");
-            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let brightness = args["brightness"].as_str().unwrap().parse::<u32>().unwrap();
 
             println!("{}{}", "set_screen_brightness: ".purple(), brightness);
@@ -155,7 +153,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         }
         "media_controls" => {
             info!("Handling media_controls function call.");
-            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let media_button = args["media_button"].as_str().unwrap();
 
             println!("{}{}", "media_controls: ".purple(), media_button);
@@ -204,7 +202,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         }
         "open_application" => {
             info!("Handling open_application function call.");
-            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let application = args["application"].as_str().unwrap();
 
             println!("{}{}", "opening application: ".purple(), application);
@@ -228,7 +226,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         "get_system_processes" => Some(get_system_processes()),
 
         "kill_processes_with_name" => {
-            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let process_name = args["process_name"].as_str().unwrap();
 
             let process_blacklist = vec![
@@ -291,7 +289,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         }),
 
         "set_timer_at" => {
-            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let time_str = args["time"].as_str().unwrap();
             let description = args["description"].as_str().unwrap_or_default();
             match time_str.parse::<DateTime<Local>>() {
@@ -371,7 +369,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
         }
 
         "delete_timer_by_id" => {
-            let args: serde_json::Value = serde_json::from_str(&fn_args).unwrap();
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let timer_id = args["timer_id"].as_u64().unwrap();
 
             match delete_timer(timer_id) {
@@ -390,7 +388,7 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
 
         "set_clipboard" => {
             // Try to parse the JSON arguments
-            let args = match serde_json::from_str::<serde_json::Value>(&fn_args) {
+            let args = match serde_json::from_str::<serde_json::Value>(fn_args) {
                 Ok(json) => json,
                 Err(e) => return Some(format!("Failed to parse arguments: {}", e)),
             };
@@ -469,7 +467,7 @@ static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
 static CACHE_DIR: LazyLock<PathBuf> =
     LazyLock::new(|| dirs::cache_dir().unwrap().join("quick-assistant"));
 
-use sysinfo::{Components, Disks, Networks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Components, Disks, Networks, System};
 
 fn get_system_info() -> String {
     let mut info = String::new();
@@ -577,7 +575,7 @@ fn get_process_names() -> Vec<String> {
     let sys = System::new_all();
     let mut process_names = Vec::new();
 
-    for (_, process) in sys.processes() {
+    for process in sys.processes().values() {
         let process_name = process.name().to_string_lossy().to_string();
 
         if !process_names.contains(&process_name) {
@@ -592,7 +590,7 @@ fn kill_processes_with_name(process_name: &str) -> Option<()> {
     // Kill all processes with the given name
     let mut sys = System::new_all();
     for (pid, process) in sys.processes() {
-        if process.name().to_string_lossy().to_string() == process_name {
+        if process.name().to_string_lossy() == process_name {
             if process.kill() {
                 debug!(
                     "Killed process with name: \"{}\" and PID: {}",
@@ -613,9 +611,9 @@ fn kill_processes_with_name(process_name: &str) -> Option<()> {
     // check if all processes with the name were killed
     sys.refresh_all();
     if get_process_names().contains(&process_name.to_string()) {
-        return None;
+        None
     } else {
-        return Some(());
+        Some(())
     }
 }
 
@@ -644,11 +642,7 @@ fn get_currently_active_log_file() -> Option<PathBuf> {
 
     entries.sort_by_key(|entry| entry.file_name());
 
-    if let Some(last) = entries.last() {
-        Some(last.path())
-    } else {
-        None
-    }
+    entries.last().map(|last| last.path())
 }
 
 fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
@@ -657,7 +651,7 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
         None => return Err("Failed to convert file path to string".to_string()),
     };
     match Command::new("cmd")
-        .args(&[
+        .args([
             "/C",
             "start",
             "powershell",

@@ -1,14 +1,11 @@
 use anyhow::bail;
 use chrono::{DateTime, Local};
 use csv::Reader;
-use flume;
-use rodio;
 use std::{
     io::BufReader,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, LazyLock, RwLock,
+        atomic::{AtomicU64, Ordering}, LazyLock, RwLock,
     }, // Use LazyLock from std
     thread,
 };
@@ -32,7 +29,7 @@ fn load_timers_from_disk(
 ) -> Result<Vec<(u64, String, DateTime<Local>)>, anyhow::Error> {
     if !path.is_file() {
         let mut wtr = csv::Writer::from_path(path)?;
-        wtr.write_record(&["id", "description", "timestamp"])?;
+        wtr.write_record(["id", "description", "timestamp"])?;
         wtr.flush()?;
         return Ok(vec![]);
     }
@@ -59,9 +56,9 @@ fn load_timers_from_disk(
 fn save_timers_to_disk(path: &Path) -> Result<(), anyhow::Error> {
     let timers = TIMERS.read().unwrap();
     let mut wtr = csv::Writer::from_path(path)?;
-    wtr.write_record(&["id", "description", "timestamp"])?;
+    wtr.write_record(["id", "description", "timestamp"])?;
     for (id, description, timestamp) in timers.iter() {
-        wtr.write_record(&[&id.to_string(), description, &timestamp.to_rfc3339()])?;
+        wtr.write_record([&id.to_string(), description, &timestamp.to_rfc3339()])?;
     }
     wtr.flush()?;
     Ok(())
