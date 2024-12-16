@@ -962,7 +962,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     debug!("BEFORE print truecolor");
-                    println!("{}", "You: ".truecolor(0, 255, 0));
+                    let green_you = "You: ".truecolor(0, 255, 0);
+                    debug!("truecolor succeeded");
+                    println!("{}", green_you);
                     debug!("AFTER print truecolor");
                     
                     println!("{}", transcription);
