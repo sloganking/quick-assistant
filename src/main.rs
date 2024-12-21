@@ -928,44 +928,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             continue;
                         }
                     };
-                    info!("Finished transcribing user audio");
 
                     let mut transcription = match transcription_result {
                         Ok(transcription) => transcription,
                         Err(err) => {
-                            warn!("Failed to transcribe audio");
-
                             println_error(&format!("Failed to transcribe audio: {:?}", err));
                             play_audio(failed_temp_file.path());
                             continue;
                         }
                     };
 
-                    debug!("Got transcription out of result: \"{}\"", truncate(&transcription, 20));
-
                     if let Some(last_char) = transcription.chars().last() {
-                        debug!("Last char of transcription: \"{}\"", last_char);
                         if ['.', '?', '!', ','].contains(&last_char) {
-                            debug!("Last char is punctuation. Adding space.");
                             transcription.push(' ');
                         }
                     }
-
-                    debug!("Transcription after potentially adding space: \"{}\"", truncate(&transcription, 20));
 
                     if transcription.is_empty() {
                         println!("No transcription");
                         info!("User transcription was empty. Aborting LLM response.");
                         continue;
-                    } else {
-                        debug!("User transcription was not empty. Continuing with LLM response.");
                     }
 
-                    debug!("BEFORE print truecolor");
-                    let green_you = "You: ".truecolor(0, 255, 0);
-                    debug!("truecolor succeeded");
-                    println!("{}", green_you);
-                    debug!("AFTER print truecolor");
+                    println!("{}", "You: ".truecolor(0, 255, 0));
                     
                     println!("{}", transcription);
                     info!("User transcription: \"{}\"", truncate(&transcription, 20));
@@ -1176,7 +1161,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 break 'request;
                             }
                         };
-                        debug!("created chat API stream");
 
                         let mut fn_name = String::new();
                         let mut fn_args = String::new();
@@ -1203,7 +1187,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
                         } {
-                            debug!("Got AI API response from stream.next()");
                             let mut llm_should_stop = thread_llm_should_stop_mutex.lock().unwrap();
 
                             if *llm_should_stop {
