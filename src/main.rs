@@ -84,19 +84,15 @@ impl From<VoiceEnum> for Voice {
 }
 
 #[derive(Debug)]
-enum MessageTypes {
-    System,
-    User,
-    Assistant,
-    Tool,
-    Function,
-}
-
-#[derive(Debug)]
-struct MessageAndType {
-    content: String,
-    fn_name: Option<String>,
-    message_type: MessageTypes,
+enum Message {
+    System { content: String },
+    User { content: String },
+    Assistant { content: String },
+    Tool { content: String },
+    Function {
+        fn_name: String,
+        content: String, // or arguments, etc.
+    },
 }
 
 fn error_and_panic(s: &str) -> ! {
@@ -147,7 +143,7 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 }
 
 #[instrument]
-fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<MessageAndType>) -> Option<String>{
+fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>) -> Option<String>{
     let mut enigo = Enigo::new();
 
     println!("{}{}", "Invoking function: ".purple(), fn_name);
@@ -302,10 +298,9 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<MessageA
         "speedtest" => {
 
             llm_messages_tx.send(
-                MessageAndType {
+                Message::Function {
                     content: "Speed test has been successfully started. It takes several seconds. The results will be shared once the speedtest is complete.".to_string(),
-                    fn_name: Some(fn_name.to_string()),
-                    message_type: MessageTypes::Function,
+                    fn_name: fn_name.to_string(),
                 }
             ).unwrap();
 
@@ -314,19 +309,17 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<MessageA
                 match speedtest() {
                     Ok(answer) => {
                         llm_messages_tx.send(
-                            MessageAndType {
+                            Message::Function {
                                 content: format!("Speedtest results: {}", answer),
-                                fn_name: Some(thread_fn_name),
-                                message_type: MessageTypes::Function,
+                                fn_name: thread_fn_name,
                             }
                         ).unwrap();
                     },
                     Err(err) => {
                         llm_messages_tx.send(
-                            MessageAndType {
+                            Message::Function {
                                 content: format!("Speedtest failed with error: {}", err),
-                                fn_name: Some(thread_fn_name),
-                                message_type: MessageTypes::Function,
+                                fn_name: thread_fn_name,
                             }
                         ).unwrap();
                     },
@@ -957,7 +950,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            let (llm_messages_tx, llm_messages_rx): (flume::Sender<MessageAndType>, flume::Receiver<MessageAndType>) = flume::unbounded();
+            let (llm_messages_tx, llm_messages_rx): (flume::Sender<Message>, flume::Receiver<Message>) = flume::unbounded();
 
             // Create user audio to text thread
             // This thread listens to the audio recorder thread and transcribes the audio
@@ -1011,10 +1004,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     thread_llm_messages_tx.send(
-                    MessageAndType {
+                    Message::User {
                             content: transcription,
-                            fn_name: None,
-                            message_type: MessageTypes::User,
                         }
                     ).unwrap();
                 }
@@ -1043,21 +1034,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 for llm_message in llm_messages_rx.iter() {
 
                     // convert message type to ChatCompletionRequestMessage
-                    match llm_message.message_type {
-                        MessageTypes::System => {
+                    match llm_message {
+                        Message::System { content } => {
                             message_history.push(
                                 ChatCompletionRequestSystemMessageArgs::default()
-                                    .content(llm_message.content)
+                                    .content(content)
                                     .build()
                                     .unwrap()
                                     .into(),
                             );
                         }
-                        MessageTypes::User => {
-
+                        Message::User { content } => {
                             // Add time header to user message
                             let time_header = format!("Local Time: {}", Local::now());
-                            let user_message = time_header + "\n" + &llm_message.content;
+                            let user_message = time_header + "\n" + &content;
 
                             message_history.push(
                                 ChatCompletionRequestUserMessageArgs::default()
@@ -1068,52 +1058,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             );
 
                             println!("{}", "You: ".truecolor(0, 255, 0));
-                
-                            println!("{}", llm_message.content);
-                            info!("User transcription: \"{}\"", truncate(&llm_message.content, 20));
-                            
-                            
+                            println!("{}", content);
+                            info!("User transcription: \"{}\"", truncate(&content, 20));
                         }
-                        MessageTypes::Assistant => {
+                        Message::Assistant { content } => {
                             message_history.push(
                                 ChatCompletionRequestAssistantMessageArgs::default()
-                                    .content(llm_message.content)
+                                    .content(content)
                                     .build()
                                     .unwrap()
                                     .into(),
                             );
                         }
-                        MessageTypes::Tool => {
+                        Message::Tool { content } => {
                             message_history.push(
                                 ChatCompletionRequestToolMessageArgs::default()
-                                    .content(llm_message.content)
+                                    .content(content)
                                     .build()
                                     .unwrap()
                                     .into(),
                             );
                         }
-                        MessageTypes::Function => {
+                        Message::Function { content, fn_name } => {
                             message_history.push(
-
-                                match llm_message.fn_name {
-                                    Some(fn_name) => {
-                                        ChatCompletionRequestFunctionMessageArgs::default()
-                                            .content(llm_message.content)
-                                            .name(fn_name)
-                                            .build()
-                                            .unwrap()
-                                            .into()
-                                    }
-                                    None => {
-                                        // ChatCompletionRequestFunctionMessageArgs::default()
-                                        //     .content(llm_message.content)
-                                        //     .build()
-                                        //     .unwrap()
-                                        //     .into()
-                                        error!("Crashing because function message type did not have a function name when it must.");
-                                        panic!("Function message type must have a function name.");
-                                    }
-                                }
+                                ChatCompletionRequestFunctionMessageArgs::default()
+                                    .content(content)
+                                    .name(fn_name)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
                             );
                         }
                     };
