@@ -1,6 +1,6 @@
 use anyhow::Context;
 use async_openai::types::{
-    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, FinishReason,
+    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, ChatCompletionRequestToolMessageArgs, FinishReason
 };
 use clipboard::{ClipboardContext, ClipboardProvider};
 use dotenvy::dotenv;
@@ -667,6 +667,42 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
         Err(err) => Err(format!("Failed to open file in powershell: {:?}", err)),
     }
 }
+
+
+static FAILED_TEMP_FILE: LazyLock<NamedTempFile> = LazyLock::new(|| {
+    // Lazily create the file from the embedded bytes
+    create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3")
+});
+            
+
+/// A global, lazily-initialized closure for sending paths into a channel.
+static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(|| {
+    // Create a channel for path buffers.
+    let (audio_playing_tx, audio_playing_rx) = flume::unbounded::<PathBuf>();
+
+    // Create the audio playing thread
+    // Playing audio has it's own dedicated thread because I wanted to be able to play audio
+    // by passing an audio file path to a function. But the audio playing function needs to
+    // have the sink and stream variable not be dropped after the end of the function.
+    tokio::spawn(async move {
+        let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+        let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+
+        for audio_path in audio_playing_rx.iter() {
+            let file = std::fs::File::open(audio_path).unwrap();
+            sink.stop();
+            sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+            // sink.play();
+        }
+    });
+
+    // Return our closure, capturing the sending side of the channel.
+    Box::new(move |path: &Path| {
+        audio_playing_tx.send(path.to_path_buf()).unwrap();
+    })
+});
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let _guard = set_up_logging(&LOGS_DIR);
@@ -682,16 +718,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
     let (speak_stream, _stream) = ss::SpeakStream::new(ai_voice, opt.speech_speed);
     let speak_stream_mutex = Arc::new(Mutex::new(speak_stream));
-
-    let (audio_playing_tx, audio_playing_rx): (flume::Sender<PathBuf>, flume::Receiver<PathBuf>) =
-        flume::unbounded();
-
-    let play_audio = move |path: &Path| {
-        audio_playing_tx.send(path.to_path_buf()).unwrap();
-    };
-
-    let failed_temp_file =
-        create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3");
 
     match opt.subcommands {
         Some(subcommand) => {
@@ -885,6 +911,90 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
+            let (llm_messages_tx, llm_messages_rx): (flume::Sender<MessageAndType>, flume::Receiver<MessageAndType>) = flume::unbounded();
+
+            // Create user audio to text thread
+            // This thread listens to the audio recorder thread and transcribes the audio
+            // before feeding it to the AI assistant.
+            let thread_speak_stream_mutex = speak_stream_mutex.clone();
+            thread::spawn(move || {
+                let client = Client::new();
+
+                let runtime = tokio::runtime::Runtime::new()
+                    .context("Failed to create tokio runtime")
+                    .unwrap();
+
+                for audio_path in recording_rx.iter() {
+
+                    let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
+                    thread_speak_stream.stop_speech();
+                    drop(thread_speak_stream);
+
+                    info!("Transcribing user audio");
+                    let transcription_result = match runtime.block_on(future::timeout(
+                        Duration::from_secs(10),
+                        transcribe::transcribe(&client, &audio_path),
+                    )) {
+                        Ok(transcription_result) => transcription_result,
+                        Err(err) => {
+                            println_error(&format!(
+                                "Failed to transcribe audio due to timeout: {:?}",
+                                err
+                            ));
+
+                            PLAY_AUDIO(FAILED_TEMP_FILE.path());
+
+                            continue;
+                        }
+                    };
+
+                    let mut transcription = match transcription_result {
+                        Ok(transcription) => transcription,
+                        Err(err) => {
+                            println_error(&format!("Failed to transcribe audio: {:?}", err));
+                            PLAY_AUDIO(FAILED_TEMP_FILE.path());
+                            continue;
+                        }
+                    };
+
+                    if let Some(last_char) = transcription.chars().last() {
+                        if ['.', '?', '!', ','].contains(&last_char) {
+                            transcription.push(' ');
+                        }
+                    }
+
+                    if transcription.is_empty() {
+                        println!("No transcription");
+                        info!("User transcription was empty. Aborting LLM response.");
+                        continue;
+                    }
+
+                    llm_messages_tx.send(
+                        MessageAndType {
+                            content: transcription,
+                            message_type: MessageTypes::User,
+                        }
+                    ).unwrap();
+                }
+
+            });
+
+            #[derive(Debug)]
+            enum MessageTypes {
+                System,
+                User,
+                Assistant,
+                Tool,
+                Function,
+            }
+
+            #[derive(Debug)]
+            struct MessageAndType {
+                content: String,
+                message_type: MessageTypes,
+            }
+
+
             // Create AI thread
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
@@ -906,65 +1016,68 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .context("Failed to create tokio runtime")
                     .unwrap();
 
-                for audio_path in recording_rx.iter() {
-                    let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
-                    thread_speak_stream.stop_speech();
-                    drop(thread_speak_stream);
-
-                    info!("Transcribing user audio");
-                    let transcription_result = match runtime.block_on(future::timeout(
-                        Duration::from_secs(10),
-                        transcribe::transcribe(&client, &audio_path),
-                    )) {
-                        Ok(transcription_result) => transcription_result,
-                        Err(err) => {
-                            println_error(&format!(
-                                "Failed to transcribe audio due to timeout: {:?}",
-                                err
-                            ));
-
-                            play_audio(failed_temp_file.path());
-
-                            continue;
-                        }
-                    };
-
-                    let mut transcription = match transcription_result {
-                        Ok(transcription) => transcription,
-                        Err(err) => {
-                            println_error(&format!("Failed to transcribe audio: {:?}", err));
-                            play_audio(failed_temp_file.path());
-                            continue;
-                        }
-                    };
-
-                    if let Some(last_char) = transcription.chars().last() {
-                        if ['.', '?', '!', ','].contains(&last_char) {
-                            transcription.push(' ');
-                        }
-                    }
-
-                    if transcription.is_empty() {
-                        println!("No transcription");
-                        info!("User transcription was empty. Aborting LLM response.");
-                        continue;
-                    }
-
-                    println!("{}", "You: ".truecolor(0, 255, 0));
+                for llm_message in llm_messages_rx.iter() {
                     
-                    println!("{}", transcription);
-                    info!("User transcription: \"{}\"", truncate(&transcription, 20));
+                    // convert message type to ChatCompletionRequestMessage
+                    match llm_message.message_type {
+                        MessageTypes::System => {
+                            message_history.push(
+                                ChatCompletionRequestSystemMessageArgs::default()
+                                    .content(llm_message.content)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
+                            );
+                        }
+                        MessageTypes::User => {
 
-                    let time_header = format!("Local Time: {}", Local::now());
-                    let user_message = time_header + "\n" + &transcription;
+                            // Add time header to user message
+                            let time_header = format!("Local Time: {}", Local::now());
+                            let user_message = time_header + "\n" + &llm_message.content;
 
-                    message_history.push(
-                        ChatCompletionRequestUserMessageArgs::default()
-                            .content(user_message)
-                            .build()
-                            .unwrap()
-                            .into(),
-                    );
+                            message_history.push(
+                                ChatCompletionRequestUserMessageArgs::default()
+                                    .content(user_message)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
+                            );
+
+                            println!("{}", "You: ".truecolor(0, 255, 0));
+                
+                            println!("{}", llm_message.content);
+                            info!("User transcription: \"{}\"", truncate(&llm_message.content, 20));
+                            
+                            
+                        }
+                        MessageTypes::Assistant => {
+                            message_history.push(
+                                ChatCompletionRequestAssistantMessageArgs::default()
+                                    .content(llm_message.content)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
+                            );
+                        }
+                        MessageTypes::Tool => {
+                            message_history.push(
+                                ChatCompletionRequestToolMessageArgs::default()
+                                    .content(llm_message.content)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
+                            );
+                        }
+                        MessageTypes::Function => {
+                            message_history.push(
+                                ChatCompletionRequestFunctionMessageArgs::default()
+                                    .content(llm_message.content)
+                                    .build()
+                                    .unwrap()
+                                    .into(),
+                            );
+                        }
+                    };
 
                     // Make sure the LLM token generation is allowed to start
                     // It should only be stopped when the LLM is running.
@@ -1145,7 +1258,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Err(err) => {
                                     println_error(&format!("Failed to create stream: {}", err));
 
-                                    play_audio(failed_temp_file.path());
+                                    PLAY_AUDIO(FAILED_TEMP_FILE.path());
 
                                     break 'request;
                                 }
@@ -1156,7 +1269,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     err
                                 ));
 
-                                play_audio(failed_temp_file.path());
+                                PLAY_AUDIO(FAILED_TEMP_FILE.path());
 
                                 break 'request;
                             }
@@ -1181,7 +1294,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         err
                                     ));
 
-                                    play_audio(failed_temp_file.path());
+                                    PLAY_AUDIO(FAILED_TEMP_FILE.path());
 
                                     break 'request;
                                 }
@@ -1375,22 +1488,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     thread_speak_stream.complete_sentence();
                     drop(thread_speak_stream);
                     debug!("AI token generation complete.");
-                }
-            });
-
-            // Create the audio playing thread
-            // Playing audio has it's own dedicated thread because I wanted to be able to play audio
-            // by passing an audio file path to a function. But the audio playing function needs to
-            // have the sink and stream variable not be dropped after the end of the function.
-            tokio::spawn(async move {
-                let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-
-                for audio_path in audio_playing_rx.iter() {
-                    let file = std::fs::File::open(audio_path).unwrap();
-                    sink.stop();
-                    sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    // sink.play();
                 }
             });
 
