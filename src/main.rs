@@ -1350,7 +1350,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 message_history.push(
                                     ChatCompletionRequestAssistantMessageArgs::default()
                                         .content(ai_content)
-                                        // .role(Role::Assistant)
                                         .build()
                                         .unwrap()
                                         .into(),
