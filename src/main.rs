@@ -987,10 +987,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 message_type: MessageTypes,
             }
 
-
             // Create AI thread
-            // This thread listens to the audio recorder thread and transcribes the audio
-            // before feeding it to the AI assistant.
+            // This thread receives new llm messages and processes them with the AI.
             let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             let thread_speak_stream_mutex = speak_stream_mutex.clone();
             thread::spawn(move || {
