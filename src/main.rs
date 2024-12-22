@@ -948,7 +948,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    let mut transcription = match transcription_result {
+                    let transcription = match transcription_result {
                         Ok(transcription) => transcription,
                         Err(err) => {
                             println_error(&format!("Failed to transcribe audio: {:?}", err));
@@ -957,12 +957,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     };
 
-                    if let Some(last_char) = transcription.chars().last() {
-                        if ['.', '?', '!', ','].contains(&last_char) {
-                            transcription.push(' ');
-                        }
-                    }
-
                     if transcription.is_empty() {
                         println!("No transcription");
                         info!("User transcription was empty. Aborting LLM response.");
@@ -970,13 +964,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     llm_messages_tx.send(
-                        MessageAndType {
+                    MessageAndType {
                             content: transcription,
                             message_type: MessageTypes::User,
                         }
                     ).unwrap();
                 }
-
             });
 
             #[derive(Debug)]
@@ -1017,7 +1010,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for llm_message in llm_messages_rx.iter() {
-                    
+
                     // convert message type to ChatCompletionRequestMessage
                     match llm_message.message_type {
                         MessageTypes::System => {
