@@ -5,7 +5,8 @@ use std::{
     io::BufReader,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering}, LazyLock, RwLock,
+        atomic::{AtomicU64, Ordering},
+        LazyLock, RwLock,
     }, // Use LazyLock from std
     thread,
 };
@@ -102,7 +103,7 @@ pub fn delete_timer(id: u64) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub fn check_timers() -> Result<Vec<(u64, String, DateTime<Local>)>, anyhow::Error> {
+fn check_timers() -> Result<Vec<(u64, String, DateTime<Local>)>, anyhow::Error> {
     let mut expired_timers = Vec::new();
     {
         let mut timers = TIMERS.write().unwrap();
@@ -122,13 +123,21 @@ pub fn check_timers() -> Result<Vec<(u64, String, DateTime<Local>)>, anyhow::Err
     Ok(expired_timers)
 }
 
+pub struct Timer {
+    pub id: u64,
+    pub description: String,
+    pub timestamp: DateTime<Local>,
+}
+
 pub struct AudibleTimers {
     audio_stop_tx: flume::Sender<()>,
 }
 
 impl AudibleTimers {
-    pub fn new(audio_file: PathBuf) -> Result<Self, anyhow::Error> {
+    pub fn new(audio_file: PathBuf) -> Result<(Self, flume::Receiver<Timer>), anyhow::Error> {
         let (audio_stop_tx, audio_stop_rx) = flume::unbounded();
+        let (expired_timers_tx, expired_timers_rx): (flume::Sender<Timer>, flume::Receiver<Timer>) =
+            flume::unbounded();
 
         thread::spawn(move || {
             let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
@@ -155,7 +164,6 @@ impl AudibleTimers {
                 };
 
                 if !expired_timers.is_empty() {
-                    // You could handle the expired timers here (log them, pass them to your AI, etc.)
                     for (id, description, timestamp) in &expired_timers {
                         info!(
                             "Timer expired (ID: {}): description: \"{}\", time: {}",
@@ -163,6 +171,18 @@ impl AudibleTimers {
                             description,
                             &timestamp.to_rfc3339()
                         );
+                    }
+
+                    // send expired timers to the main thread
+                    for (id, description, timestamp) in expired_timers {
+                        let timer = Timer {
+                            id,
+                            description,
+                            timestamp,
+                        };
+                        if let Err(e) = expired_timers_tx.send(timer) {
+                            warn!("Failed to send expired timer to main thread: {}", e);
+                        }
                     }
 
                     'alarm_loop: loop {
@@ -200,10 +220,10 @@ impl AudibleTimers {
             }
         });
 
-        Ok(AudibleTimers { audio_stop_tx })
+        Ok((AudibleTimers { audio_stop_tx }, expired_timers_rx))
     }
 
     pub fn stop_alarm(&self) {
-        let _ = self.audio_stop_tx.send(());
+        self.audio_stop_tx.send(()).unwrap();
     }
 }

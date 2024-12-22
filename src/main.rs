@@ -699,7 +699,7 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> = LazyLock::new(|| {
     create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3")
 });
-            
+           
 
 /// A global, lazily-initialized closure for sending paths into a channel.
 static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(|| {
@@ -824,6 +824,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let llm_should_stop_mutex = Arc::new(Mutex::new(false));
 
+            let alarm_temp_file = create_temp_file_from_bytes(
+                include_bytes!("../assets/Dreaming of Victory.mp3"),
+                ".mp3",
+            );
+            let (audible_timers, expired_timers_rx) = AudibleTimers::new(alarm_temp_file.path().to_path_buf())
+                .expect("Failed to create audible_timers");
+
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
             // It then sends the path of the recorded audio file to the AI thread.
@@ -836,12 +843,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let key_to_check = ptt_key;
                 let tmp_dir = tempdir().unwrap();
                 let mut voice_tmp_path_option: Option<PathBuf> = None;
-                let alarm_temp_file = create_temp_file_from_bytes(
-                    include_bytes!("../assets/Dreaming of Victory.mp3"),
-                    ".mp3",
-                );
-                let audible_timers = AudibleTimers::new(alarm_temp_file.path().to_path_buf())
-                    .expect("Failed to create audible_timers");
+               
                 for event in key_handler_rx.iter() {
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
@@ -937,6 +939,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
             });
 
             let (llm_messages_tx, llm_messages_rx): (flume::Sender<Message>, flume::Receiver<Message>) = flume::unbounded();
+
+            // Create timer to llm message thread
+            // This thread listens to the expired timers channel and sends a message to the AI thread
+            // when a timer expires.
+            let thread_llm_messages_tx = llm_messages_tx.clone();
+            thread::spawn(move || {
+                for timer in expired_timers_rx.iter() {
+                    let timer_string = &format!(
+                        "Timer_ID: \"{}\" Timer_description: \"{}\" goes off at time: \"{}\"",
+                        timer.id,
+                        timer.description,
+                        timer.timestamp.to_rfc3339(),
+                    );
+                    thread_llm_messages_tx.send(
+                        Message::Function { fn_name: "check_on_timers".to_string(), content: format!("A timer has gone off with the following details. Depending on what the timer is for, alert the user a timer at the given time has gone off, and tell them what it's time for them to do. Or take independent action accordingly.\n{}", timer_string)}
+                    ).unwrap();
+                }
+            });
 
             // Create user audio to text thread
             // This thread listens to the audio recorder thread and transcribes the audio
