@@ -83,6 +83,22 @@ impl From<VoiceEnum> for Voice {
     }
 }
 
+#[derive(Debug)]
+enum MessageTypes {
+    System,
+    User,
+    Assistant,
+    Tool,
+    Function,
+}
+
+#[derive(Debug)]
+struct MessageAndType {
+    content: String,
+    fn_name: Option<String>,
+    message_type: MessageTypes,
+}
+
 fn error_and_panic(s: &str) -> ! {
     error!("A fatal error occured: {}", s);
     panic!("{}", s);
@@ -131,7 +147,7 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 }
 
 #[instrument]
-fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
+fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<MessageAndType>) -> Option<String>{
     let mut enigo = Enigo::new();
 
     println!("{}{}", "Invoking function: ".purple(), fn_name);
@@ -283,10 +299,41 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
             }
         }
 
-        "speedtest" => Some(match speedtest() {
-            Ok(answer) => answer,
-            Err(err) => err,
-        }),
+        "speedtest" => {
+
+            llm_messages_tx.send(
+                MessageAndType {
+                    content: "Speed test has been successfully started. It takes several seconds. The results will be shared once the speedtest is complete.".to_string(),
+                    fn_name: Some(fn_name.to_string()),
+                    message_type: MessageTypes::Function,
+                }
+            ).unwrap();
+
+            let thread_fn_name = fn_name.to_string();
+            thread::spawn(move || {
+                match speedtest() {
+                    Ok(answer) => {
+                        llm_messages_tx.send(
+                            MessageAndType {
+                                content: format!("Speedtest results: {}", answer),
+                                fn_name: Some(thread_fn_name),
+                                message_type: MessageTypes::Function,
+                            }
+                        ).unwrap();
+                    },
+                    Err(err) => {
+                        llm_messages_tx.send(
+                            MessageAndType {
+                                content: format!("Speedtest failed with error: {}", err),
+                                fn_name: Some(thread_fn_name),
+                                message_type: MessageTypes::Function,
+                            }
+                        ).unwrap();
+                    },
+                }
+            });
+            None
+        },
 
         "set_timer_at" => {
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
@@ -411,7 +458,6 @@ fn call_fn(fn_name: &str, fn_args: &str) -> Option<String> {
                 Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
             }
         }
-
 
         _ => {
             println!("Unknown function: {}", fn_name);
@@ -917,6 +963,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // This thread listens to the audio recorder thread and transcribes the audio
             // before feeding it to the AI assistant.
             let thread_speak_stream_mutex = speak_stream_mutex.clone();
+            let thread_llm_messages_tx = llm_messages_tx.clone();
             thread::spawn(move || {
                 let client = Client::new();
 
@@ -963,29 +1010,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
 
-                    llm_messages_tx.send(
+                    thread_llm_messages_tx.send(
                     MessageAndType {
                             content: transcription,
+                            fn_name: None,
                             message_type: MessageTypes::User,
                         }
                     ).unwrap();
                 }
             });
-
-            #[derive(Debug)]
-            enum MessageTypes {
-                System,
-                User,
-                Assistant,
-                Tool,
-                Function,
-            }
-
-            #[derive(Debug)]
-            struct MessageAndType {
-                content: String,
-                message_type: MessageTypes,
-            }
 
             // Create AI thread
             // This thread receives new llm messages and processes them with the AI.
@@ -1061,11 +1094,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                         MessageTypes::Function => {
                             message_history.push(
-                                ChatCompletionRequestFunctionMessageArgs::default()
-                                    .content(llm_message.content)
-                                    .build()
-                                    .unwrap()
-                                    .into(),
+
+                                match llm_message.fn_name {
+                                    Some(fn_name) => {
+                                        ChatCompletionRequestFunctionMessageArgs::default()
+                                            .content(llm_message.content)
+                                            .name(fn_name)
+                                            .build()
+                                            .unwrap()
+                                            .into()
+                                    }
+                                    None => {
+                                        // ChatCompletionRequestFunctionMessageArgs::default()
+                                        //     .content(llm_message.content)
+                                        //     .build()
+                                        //     .unwrap()
+                                        //     .into()
+                                        error!("Crashing because function message type did not have a function name when it must.");
+                                        panic!("Function message type must have a function name.");
+                                    }
+                                }
                             );
                         }
                     };
@@ -1328,9 +1376,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         }
                                         if let Some(finish_reason) = &chat_choice.finish_reason {
                                             if matches!(finish_reason, FinishReason::FunctionCall) {
-                                                let func_response = call_fn(&fn_name, &fn_args);
+                                                let func_response_option = call_fn(&fn_name, &fn_args, llm_messages_tx.clone());
 
-                                                if let Some(func_response) = func_response {
+                                                if let Some(func_response) = func_response_option {
                                                     message_history.push(
                                                         ChatCompletionRequestFunctionMessageArgs::default()
                                                             .name(fn_name.clone())
