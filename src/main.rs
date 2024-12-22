@@ -91,7 +91,7 @@ enum Message {
     Tool { content: String },
     Function {
         fn_name: String,
-        content: String, // or arguments, etc.
+        content: String,
     },
 }
 
@@ -229,7 +229,7 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
         }
         "open_logs_folder" => {
             match open::that(&*LOGS_DIR) {
-                Ok(_) => None, // If unwrap succeeds, return None
+                Ok(_) => None,
                 Err(e) => Some(String::from("Showing logs folder failed with: ") + &e.to_string()), // If unwrap fails, return Some with the error message
             }
         }
@@ -337,7 +337,6 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
                     Ok(_) => {
 
                         let success_response_message = {
-                            // calculate time difference
                             let time_diff = timestamp.signed_duration_since(Local::now());
 
                             // Convert to std::time::Duration and handle potential negative durations
@@ -371,12 +370,9 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
 
         "check_on_timers" => {
             let timers = get_timers();
-            // construct information string
             let mut info = String::from("=== Timers ===\n");
             for timer in timers {
-                // let timer_name = &timer.1;
                 let timer_time = timer.2;
-                // calculate time difference
                 let time_diff = timer_time.signed_duration_since(Local::now());
 
                 // Convert to std::time::Duration and handle potential negative durations
@@ -427,25 +423,21 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
         },
 
         "set_clipboard" => {
-            // Try to parse the JSON arguments
             let args = match serde_json::from_str::<serde_json::Value>(fn_args) {
                 Ok(json) => json,
                 Err(e) => return Some(format!("Failed to parse arguments: {}", e)),
             };
 
-            // Extract the clipboard text
             let clipboard_text = match args["clipboard_text"].as_str() {
                 Some(text) => text,
                 None => return Some("Missing 'clipboard_text' argument.".to_string()),
             };
 
-            // Attempt to create a clipboard context
             let mut clipboard: ClipboardContext = match ClipboardProvider::new() {
                 Ok(c) => c,
                 Err(e) => return Some(format!("Failed to initialize clipboard: {}", e)),
             };
 
-            // Try to set the clipboard contents
             match clipboard.set_contents(clipboard_text.to_string()) {
                 Ok(_) => Some("Clipboard set successfully.".to_string()),
                 Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
@@ -511,10 +503,8 @@ use sysinfo::{Components, Disks, Networks, System};
 fn get_system_info() -> String {
     let mut info = String::new();
 
-    // Create a new System instance
     let mut sys = System::new_all();
 
-    // Refresh all information
     sys.refresh_all();
 
     // Add "=> system:" to info
@@ -578,10 +568,8 @@ fn get_system_info() -> String {
 fn get_system_processes() -> String {
     let mut info = String::new();
 
-    // Create a new System instance
     let mut sys = System::new_all();
 
-    // Refresh all information
     sys.refresh_all();
 
     // Add "=> processes:" to info
@@ -709,7 +697,6 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
 
 
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> = LazyLock::new(|| {
-    // Lazily create the file from the embedded bytes
     create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3")
 });
             
@@ -862,7 +849,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 key_pressed = true;
                                 // handle key press
 
-                                // stop any alarms
                                 audible_timers.stop_alarm();
 
                                 // stop the AI voice from speaking
@@ -1290,7 +1276,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut fn_name = String::new();
                         let mut fn_args = String::new();
                         let mut inside_code_block = false;
-                        // negative number to indicate that the last codeblock line is unknown
                         let mut last_codeblock_line_option: Option<usize> = None;
                         let mut figure_number = 1;
 
@@ -1391,7 +1376,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 thread_speak_stream_mutex: &Arc<Mutex<SpeakStream>>,
                                             ) {
                                                 *inside_code_block = true;
-                                                // print!("{}", "inside_code_block = true;".truecolor(255, 0, 255));
                                                 *last_codeblock_line_option = Some(line_num);
 
                                                 // add figure text
@@ -1426,12 +1410,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                                     }
                                                                 }
                                                                 true => {
-                                                                    // println!("{}", "inside_code_block is true".truecolor(0, 0, 255));
                                                                     if line_content.ends_with("```")
                                                                     {
                                                                         inside_code_block = false;
 
-                                                                        // print!("{}", "inside_code_block = false;".truecolor(255, 0, 255));
                                                                         last_codeblock_line_option = Some(line_num);
                                                                     }
                                                                 }
