@@ -710,7 +710,7 @@ static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(||
     // Playing audio has it's own dedicated thread because I wanted to be able to play audio
     // by passing an audio file path to a function. But the audio playing function needs to
     // have the sink and stream variable not be dropped after the end of the function.
-    tokio::spawn(async move {
+    thread::spawn( move || {
         let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
