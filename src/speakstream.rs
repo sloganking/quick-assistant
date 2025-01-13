@@ -342,49 +342,54 @@ pub mod ss {
             // 2) Audio-playing thread
             // ---------------------------------------------------------------------------
             thread::spawn(move || {
-                // Create a Tokio runtime for blocking until end
+                // Create a small Tokio runtime to handle blocking without freezing other tasks
                 let runtime = tokio::runtime::Runtime::new()
                     .context("Failed to create tokio runtime")
                     .unwrap();
 
-                // Create *one* initial OutputStream (not strictly necessary to create it here,
-                // but we do so just to mirror your old approach).
+                // We only create an initial OutputStream here, but we'll recreate it
+                // each time we get a new TTS result, matching your "old" logic.
                 let (mut _stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
                 let sink = rodio::Sink::try_new(&_stream_handle).unwrap();
                 let mut ai_voice_sink = Arc::new(sink);
 
-                for tts_result in ai_audio_playing_rx.iter() {
-                    // 1. Create a brand-new OutputStream + Sink *each* time (old approach).
+                // Instead of a `for tts_result in ai_audio_playing_rx.iter()`,
+                // we use a loop that calls `.recv()` so we can flush the queue as needed.
+                loop {
+                    // 2) Try to receive the next TTS result. If the channel is closed, we're done.
+                    let tts_result = match ai_audio_playing_rx.recv() {
+                        Ok(r) => r,
+                        Err(_) => {
+                            // The sending side is closed, no more audio to play
+                            break;
+                        }
+                    };
+
+                    // 3) Each time we get a new TTS result, we create a brand-new OutputStream + Sink
+                    //    (like your original code).
                     let (new_stream, new_handle) = rodio::OutputStream::try_default().unwrap();
                     let new_sink = rodio::Sink::try_new(&new_handle).unwrap();
 
-                    // Overwrite the older references with new ones
+                    // Overwrite the older references
                     ai_voice_sink = Arc::new(new_sink);
                     _stream = new_stream;
 
+                    // 4) Decide what to play: normal TTS audio or error sound
                     match tts_result {
                         TtsResult::Ok(tempfile, text) => {
-                            // Open the TTS file
                             let file = std::fs::File::open(tempfile.path()).unwrap();
-
-                            // Stop the sink, just like old code, then append
-                            // (Though strictly speaking, `stop()` might not be necessary on a brand-new sink,
-                            // but we replicate your old code exactly.)
+                            // old code called stop() on the brand-new sink, so let's do that
                             ai_voice_sink.stop();
-
                             ai_voice_sink.append(
                                 rodio::Decoder::new(std::io::BufReader::new(file)).unwrap(),
                             );
-
                             info!("Playing AI voice audio: \"{}\"", truncate(&text, 20));
                         }
                         TtsResult::Err(text, error_msg) => {
-                            // Log the error
                             println_error(&format!(
                                 "Failed to speak text: \"{}\" due to error: {}",
                                 text, error_msg
                             ));
-                            // Attempt to open & play error sound file
                             match std::fs::File::open(ERROR_SOUND_PATH) {
                                 Ok(file) => {
                                     ai_voice_sink.stop();
@@ -406,31 +411,36 @@ pub mod ss {
                         }
                     }
 
-                    // 2. Drain any leftover stop_speech messages
-                    //    (Matches your old code's "while stop_speech_rx.try_recv().is_ok() {}" line.)
+                    // 5) Drain ANY leftover stop messages before we block
                     while stop_speech_rx.try_recv().is_ok() {}
 
-                    // 3. Block until audio finishes or we receive a stop signal
+                    // 6) Block until the sink finishes playing or we see a new stop signal
                     runtime.block_on(async {
                         let blocking_task = {
                             let ai_voice_sink = ai_voice_sink.clone();
-
-                            // We'll use spawn_blocking so that .sleep_until_end() doesn't block the entire runtime
-                            task::spawn_blocking(move || {
+                            tokio::task::spawn_blocking(move || {
                                 ai_voice_sink.sleep_until_end();
                             })
                         };
 
-                        select! {
+                        futures::select! {
                             _ = blocking_task.fuse() => {
-                                // The audio finished naturally.
+                                // The audio finished naturally
                             },
                             _ = stop_speech_rx.recv_async() => {
-                                // If we got a stop signal, drain the channel for any additional signals
+                                // We got a stop signal
                                 while stop_speech_rx.try_recv().is_ok() {}
-
-                                // Then stop the sink
                                 ai_voice_sink.stop();
+
+                                // 7) **Flush** the entire `ai_audio_playing_rx` queue
+                                //    so no future items are played from the old backlog
+                                while let Ok(_discard) = ai_audio_playing_rx.try_recv() {
+                                    // do nothing, just discard
+                                }
+
+                                // 8) Continue the loop.
+                                // We'll block on `ai_audio_playing_rx.recv()` again,
+                                // so if brand-new tokens appear AFTER stop, we still speak them.
                             }
                         }
                     });
