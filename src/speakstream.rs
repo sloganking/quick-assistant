@@ -7,8 +7,8 @@ pub mod ss {
     };
     use async_std::future;
     use colored::Colorize;
-    use futures::{future::FutureExt, select};
-    use rodio::OutputStream;
+
+    use crate::default_device_sink::DefaultDeviceSink;
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Command;
@@ -17,7 +17,6 @@ pub mod ss {
     use std::time::Duration;
     use tempfile::Builder;
     use tempfile::NamedTempFile;
-    use tokio::task;
     
     use tracing::info;
     use tracing::{debug, warn};
@@ -263,7 +262,7 @@ pub mod ss {
     }
 
     impl SpeakStream {
-        pub fn new(voice: Voice, speech_speed: f32) -> (Self, OutputStream) {
+        pub fn new(voice: Voice, speech_speed: f32) -> Self {
             // The maximum number of audio files that can be queued up to be played by the AI voice audio
             // playing thread Limiting this number prevents converting too much text to speech at once and
             // incurring large API costs for conversions that may not be used if speaking is stopped.
@@ -276,10 +275,7 @@ pub mod ss {
             let (stop_speech_tx, stop_speech_rx): (flume::Sender<()>, flume::Receiver<()>) =
                 flume::unbounded();
 
-            // Create the AI voice audio sink
-            let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-            let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
-            let _ai_voice_sink = Arc::new(ai_voice_sink);
+            // The audio sink will be created inside the audio playing thread.
 
             let (ai_audio_playing_tx, ai_audio_playing_rx): (
                 flume::Sender<(NamedTempFile, String)>,
@@ -368,23 +364,10 @@ pub mod ss {
             // let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
             thread::spawn(move || {
-                let runtime = tokio::runtime::Runtime::new()
-                    .context("Failed to create tokio runtime")
-                    .unwrap();
-
-                let (mut _stream, _stream_handle) = rodio::OutputStream::try_default().unwrap();
-                let ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
-                let mut ai_voice_sink = Arc::new(ai_voice_sink);
+                let ai_voice_sink = DefaultDeviceSink::new();
+                let ai_voice_sink = Arc::new(ai_voice_sink);
 
                 for (ai_speech_segment, ai_text) in thread_ai_audio_playing_rx.iter() {
-                    // create new stream and sink
-                    let (new_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                    let new_ai_voice_sink = rodio::Sink::try_new(&stream_handle).unwrap();
-
-                    // put them in the persistent vars
-                    ai_voice_sink = Arc::new(new_ai_voice_sink);
-                    _stream = new_stream;
-
                     // play the sound of AI speech
                     let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                     ai_voice_sink.stop();
@@ -396,40 +379,31 @@ pub mod ss {
                     while stop_speech_rx.try_recv().is_ok() {}
 
                     // ai_voice_sink.stop();
-                    runtime.block_on(async {
-                        let blocking_task = {
-                            let ai_voice_sink = ai_voice_sink.clone();
+                    loop {
+                        if ai_voice_sink.empty() {
+                            break;
+                        }
 
-                            task::spawn_blocking(move || {
-                                // Your blocking operation here
-                                ai_voice_sink.sleep_until_end()
-                            })
-                        };
+                        if stop_speech_rx.try_recv().is_ok() {
+                            // empty the stop_speech_rx channel.
+                            while stop_speech_rx.try_recv().is_ok() {}
+                            ai_voice_sink.stop();
+                            break;
+                        }
 
-                        select! {
-                            _ = blocking_task.fuse() => {},
-                            _ = stop_speech_rx.recv_async() => {
-                                // empty the stop_speech_rx channel.
-                                while stop_speech_rx.try_recv().is_ok(){}
-
-                                ai_voice_sink.stop();
-                            }
-                        };
-                    });
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                 }
             });
 
-            (
-                SpeakStream {
-                    sentence_accumulator: SentenceAccumulator::new(),
-                    ai_tts_tx,
-                    ai_tts_rx,
-                    futures_ordered_kill_tx,
-                    stop_speech_tx,
-                    ai_audio_playing_rx,
-                },
-                _stream,
-            )
+            SpeakStream {
+                sentence_accumulator: SentenceAccumulator::new(),
+                ai_tts_tx,
+                ai_tts_rx,
+                futures_ordered_kill_tx,
+                stop_speech_tx,
+                ai_audio_playing_rx,
+            }
         }
 
         pub fn add_token(&mut self, token: &str) {

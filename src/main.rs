@@ -18,6 +18,7 @@ use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
 mod timers;
 mod transcribe;
+mod default_device_sink;
 use chrono::{DateTime, Local};
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
@@ -742,7 +743,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let (speak_stream, _stream) = ss::SpeakStream::new(ai_voice, opt.speech_speed);
+    let speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed);
     let speak_stream_mutex = Arc::new(Mutex::new(speak_stream));
 
     match opt.subcommands {
