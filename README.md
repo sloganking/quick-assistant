@@ -21,3 +21,11 @@ The assistant has functions for controling the desktop. Such as:
 - Run internet speedtests
 - Set timers that end in alarm sounds
 - Set the system clipboard
+
+## Setup
+
+Run the setup script to install system dependencies:
+
+```bash
+./setup.sh
+```
