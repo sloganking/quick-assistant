@@ -9,6 +9,7 @@ pub mod ss {
     use colored::Colorize;
 
     use crate::default_device_sink::DefaultDeviceSink;
+    use crate::FAILED_TEMP_FILE;
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Command;
@@ -250,6 +251,11 @@ pub mod ss {
         s.chars().rev().nth(1)
     }
 
+    enum AudioTask {
+        Speech(NamedTempFile, String),
+        Error,
+    }
+
     /// SpeakStream is a struct that accumulates tokens into sentences
     /// Once a sentence is complete, it speaks the sentence using the AI voice.
     pub struct SpeakStream {
@@ -258,7 +264,7 @@ pub mod ss {
         ai_tts_rx: flume::Receiver<String>,
         futures_ordered_kill_tx: flume::Sender<()>,
         stop_speech_tx: flume::Sender<()>,
-        ai_audio_playing_rx: flume::Receiver<(NamedTempFile, String)>,
+        ai_audio_playing_rx: flume::Receiver<AudioTask>,
     }
 
     impl SpeakStream {
@@ -278,8 +284,8 @@ pub mod ss {
             // The audio sink will be created inside the audio playing thread.
 
             let (ai_audio_playing_tx, ai_audio_playing_rx): (
-                flume::Sender<(NamedTempFile, String)>,
-                flume::Receiver<(NamedTempFile, String)>,
+                flume::Sender<AudioTask>,
+                flume::Receiver<AudioTask>,
             ) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
             let (futures_ordered_kill_tx, futures_ordered_kill_rx): (
@@ -348,12 +354,24 @@ pub mod ss {
 
                                 if !kill_signal_sent {
                                     // send tempfile to ai voice audio playing thread
-                                    ai_audio_playing_tx.send((tempfile, ai_text)).unwrap();
+                                    ai_audio_playing_tx
+                                        .send(AudioTask::Speech(tempfile, ai_text))
+                                        .unwrap();
                                 }
                             }
                             None => {
-                                // play_audio(&failed_temp_file.path());
                                 println_error("failed to turn text to speech");
+                                let mut kill_signal_sent = false;
+                                for _ in futures_ordered_kill_rx.try_iter() {
+                                    while let Ok(handle) = converting_rx.try_recv() {
+                                        handle.abort();
+                                    }
+                                    kill_signal_sent = true;
+                                }
+
+                                if !kill_signal_sent {
+                                    ai_audio_playing_tx.send(AudioTask::Error).unwrap();
+                                }
                             }
                         }
                     }
@@ -367,12 +385,23 @@ pub mod ss {
                 let ai_voice_sink = DefaultDeviceSink::new();
                 let ai_voice_sink = Arc::new(ai_voice_sink);
 
-                for (ai_speech_segment, ai_text) in thread_ai_audio_playing_rx.iter() {
-                    // play the sound of AI speech
-                    let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
-                    ai_voice_sink.stop();
-                    ai_voice_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
-                    info!("Playing AI voice audio: \"{}\"", truncate(&ai_text, 20));
+                for task in thread_ai_audio_playing_rx.iter() {
+                    match task {
+                        AudioTask::Speech(ai_speech_segment, ai_text) => {
+                            let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
+                            ai_voice_sink.stop();
+                            ai_voice_sink
+                                .append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                            info!("Playing AI voice audio: \"{}\"", truncate(&ai_text, 20));
+                        }
+                        AudioTask::Error => {
+                            let file = std::fs::File::open(FAILED_TEMP_FILE.path()).unwrap();
+                            ai_voice_sink.stop();
+                            ai_voice_sink
+                                .append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                            info!("Playing AI voice error audio");
+                        }
+                    }
 
                     // sink.play();
 
