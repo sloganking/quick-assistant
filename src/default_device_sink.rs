@@ -1,6 +1,13 @@
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{OutputStream, Sink, Source};
+use rodio::{buffer::SamplesBuffer, OutputStream, Sink, Source};
+
+struct AudioBuffer {
+    channels: u16,
+    sample_rate: u32,
+    data: Arc<Vec<f32>>,
+}
 
 /// Returns the name of the current default output device, if any.
 fn default_device_name() -> Option<String> {
@@ -13,6 +20,7 @@ struct Inner {
     _stream: OutputStream,
     sink: Sink,
     device_name: Option<String>,
+    queue: VecDeque<AudioBuffer>,
 }
 
 /// `DefaultDeviceSink` wraps a `rodio::Sink` and recreates the underlying
@@ -34,6 +42,7 @@ impl DefaultDeviceSink {
                 _stream: stream,
                 sink,
                 device_name: name,
+                queue: VecDeque::new(),
             })),
         }
     }
@@ -45,31 +54,46 @@ impl DefaultDeviceSink {
         if current != inner.device_name {
             let (stream, handle) = OutputStream::try_default()
                 .expect("Failed to open default output stream");
-            let sink = Sink::try_new(&handle).expect("Failed to create Sink");
-            // Stop old sink so it doesn't continue playing.
+            let mut new_sink = Sink::try_new(&handle).expect("Failed to create Sink");
+            // Restart queued buffers on the new sink
+            for buf in &inner.queue {
+                let buffer = SamplesBuffer::new(buf.channels, buf.sample_rate, (*buf.data).clone());
+                new_sink.append::<SamplesBuffer<f32>>(buffer);
+            }
             inner.sink.stop();
             inner._stream = stream;
-            inner.sink = sink;
+            inner.sink = new_sink;
             inner.device_name = current;
         }
     }
 
     /// Appends a source to the sink, ensuring that the default device is current.
-    pub fn append<S>(&self, source: S)
+    pub fn append<T>(&self, source: T)
     where
-        S: Source + Send + 'static,
-        S::Item: rodio::Sample + Send,
-        f32: cpal::FromSample<S::Item>,
+        T: Source + Send + 'static,
+        T::Item: rodio::Sample + Send,
+        f32: cpal::FromSample<T::Item>,
     {
         let mut inner = self.inner.lock().unwrap();
         Self::ensure_device(&mut inner);
-        inner.sink.append(source);
+        let channels = source.channels();
+        let sample_rate = source.sample_rate();
+        let samples: Vec<f32> = source.convert_samples().collect();
+        let arc = Arc::new(samples);
+        let buffer = SamplesBuffer::new(channels, sample_rate, (*arc).clone());
+        inner.queue.push_back(AudioBuffer {
+            channels,
+            sample_rate,
+            data: arc.clone(),
+        });
+        inner.sink.append::<SamplesBuffer<f32>>(buffer);
     }
 
     /// Stops playback and clears queued sounds.
     pub fn stop(&self) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         inner.sink.stop();
+        inner.queue.clear();
     }
 
     pub fn play(&self) {
@@ -88,47 +112,58 @@ impl DefaultDeviceSink {
     }
 
     pub fn clear(&self) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         inner.sink.clear();
+        inner.queue.clear();
     }
 
     pub fn skip_one(&self) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         inner.sink.skip_one();
+        if !inner.queue.is_empty() {
+            inner.queue.pop_front();
+        }
     }
 
     pub fn sleep_until_end(&self) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.sleep_until_end();
     }
 
     pub fn empty(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.empty()
     }
 
     pub fn len(&self) -> usize {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.len()
     }
 
     pub fn volume(&self) -> f32 {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.volume()
     }
 
     pub fn set_volume(&self, value: f32) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.set_volume(value);
     }
 
     pub fn speed(&self) -> f32 {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.speed()
     }
 
     pub fn set_speed(&self, value: f32) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
+        Self::ensure_device(&mut inner);
         inner.sink.set_speed(value);
     }
 }
