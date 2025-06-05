@@ -20,6 +20,7 @@ The assistant has functions for controlling the desktop. Such as:
 - Run internet speed tests
 - Set timers that end in alarm sounds
 - Set the system clipboard
+- Change the AI voice speed during conversation
 
 ## Setup
 

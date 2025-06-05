@@ -49,7 +49,6 @@ mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
 use timers::AudibleTimers;
-use crate::default_device_sink::DefaultDeviceSink;
 mod options;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
@@ -143,11 +142,12 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
         .map(|_| ())
 }
 
-#[instrument]
+#[instrument(skip(speak_stream_mutex))]
 fn call_fn(
     fn_name: &str,
     fn_args: &str,
     llm_messages_tx: flume::Sender<Message>,
+    speak_stream_mutex: &Arc<Mutex<SpeakStream>>,
 ) -> Option<String> {
     let mut enigo = Enigo::new();
 
@@ -448,6 +448,27 @@ fn call_fn(
                 Ok(_) => Some("Clipboard set successfully.".to_string()),
                 Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
             }
+        }
+
+        "set_speech_speed" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            if let Some(speed) = args["speed"].as_f64() {
+                let speed = speed as f32;
+                if speed >= 0.5 && speed <= 100.0 {
+                    let speak_stream = speak_stream_mutex.lock().unwrap();
+                    speak_stream.set_speech_speed(speed);
+                    Some(format!("Speech speed set to {}", speed))
+                } else {
+                    Some("Speed must be between 0.5 and 100.0".to_string())
+                }
+            } else {
+                Some("Missing 'speed' argument".to_string())
+            }
+        }
+
+        "get_speech_speed" => {
+            let speak_stream = speak_stream_mutex.lock().unwrap();
+            Some(format!("Current speech speed is {}", speak_stream.get_speech_speed()))
         }
 
         _ => {
@@ -1264,6 +1285,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": ["clipboard_text"],
                                     }))
                                     .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("set_speech_speed")
+                                    .description("Sets how fast the AI voice speaks. Speed must be between 0.5 and 100.0.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "speed": { "type": "number" } },
+                                        "required": ["speed"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("get_speech_speed")
+                                    .description("Returns the current AI voice speech speed.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
                             ])
                             .build()
                             .unwrap();
@@ -1358,6 +1399,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                     &fn_name,
                                                     &fn_args,
                                                     llm_messages_tx.clone(),
+                                                    &thread_speak_stream_mutex,
                                                 );
 
                                                 if let Some(func_response) = func_response_option {

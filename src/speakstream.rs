@@ -13,7 +13,7 @@ pub mod ss {
     use std::io::BufReader;
     use std::path::Path;
     use std::process::Command;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
     use tempfile::Builder;
@@ -275,6 +275,7 @@ pub mod ss {
         futures_ordered_kill_tx: flume::Sender<()>,
         stop_speech_tx: flume::Sender<()>,
         ai_audio_playing_rx: flume::Receiver<AudioTask>,
+        speech_speed: Arc<Mutex<f32>>,
     }
 
     impl SpeakStream {
@@ -283,6 +284,9 @@ pub mod ss {
             // playing thread Limiting this number prevents converting too much text to speech at once and
             // incurring large API costs for conversions that may not be used if speaking is stopped.
             const AI_VOICE_SINK_BUFFER_SIZE: usize = 10;
+
+            let speech_speed = Arc::new(Mutex::new(speech_speed));
+            let thread_speech_speed = speech_speed.clone();
 
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
@@ -320,9 +324,11 @@ pub mod ss {
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
                             let thread_voice = thread_voice.clone();
                             let thread_ai_text = ai_text.clone();
+                            let thread_speech_speed = thread_speech_speed.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
-                                    turn_text_to_speech(thread_ai_text, speech_speed, thread_voice)
+                                    let speed = *thread_speech_speed.lock().unwrap();
+                                    turn_text_to_speech(thread_ai_text, speed, thread_voice)
                                 }))
                                 .await
                                 .unwrap();
@@ -442,6 +448,7 @@ pub mod ss {
                 futures_ordered_kill_tx,
                 stop_speech_tx,
                 ai_audio_playing_rx,
+                speech_speed,
             }
         }
 
@@ -477,6 +484,16 @@ pub mod ss {
 
             // stop the AI voice from speaking the current sentence
             self.stop_speech_tx.send(()).unwrap();
+        }
+
+        pub fn set_speech_speed(&self, speed: f32) {
+            if let Ok(mut s) = self.speech_speed.lock() {
+                *s = speed;
+            }
+        }
+
+        pub fn get_speech_speed(&self) -> f32 {
+            self.speech_speed.lock().map(|s| *s).unwrap_or(1.0)
         }
     }
 }
