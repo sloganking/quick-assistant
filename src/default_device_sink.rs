@@ -1,12 +1,39 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait};
-use rodio::{buffer::SamplesBuffer, OutputStream, Sink, Source};
+use rodio::{OutputStream, Sink, Source};
 
 struct AudioBuffer {
     channels: u16,
     sample_rate: u32,
     data: Arc<Vec<f32>>,
+    pos: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct ResumableSource {
+    channels: u16,
+    sample_rate: u32,
+    data: Arc<Vec<f32>>,
+    pos: Arc<AtomicUsize>,
+}
+
+impl Iterator for ResumableSource {
+    type Item = f32;
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.pos.fetch_add(1, Ordering::Relaxed);
+        self.data.get(idx).copied()
+    }
+}
+
+impl Source for ResumableSource {
+    fn current_frame_len(&self) -> Option<usize> { None }
+    fn channels(&self) -> u16 { self.channels }
+    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        let len = self.data.len() as f32 / self.channels as f32 / self.sample_rate as f32;
+        Some(std::time::Duration::from_secs_f32(len))
+    }
 }
 
 /// Returns the name of the current default output device, if any.
@@ -49,17 +76,41 @@ impl DefaultDeviceSink {
 
     /// Checks if the default output device has changed. If so, recreates the
     /// stream and sink so future sounds play on the new device.
+    fn sync_queue(inner: &mut Inner) {
+        while inner.queue.len() > inner.sink.len() {
+            inner.queue.pop_front();
+        }
+    }
+
     fn ensure_device(inner: &mut Inner) {
+        Self::sync_queue(inner);
         let current = default_device_name();
         if current != inner.device_name {
+            let volume = inner.sink.volume();
+            let speed = inner.sink.speed();
+            let paused = inner.sink.is_paused();
+
             let (stream, handle) = OutputStream::try_default()
                 .expect("Failed to open default output stream");
             let mut new_sink = Sink::try_new(&handle).expect("Failed to create Sink");
-            // Restart queued buffers on the new sink
+            new_sink.set_volume(volume);
+            new_sink.set_speed(speed);
+
+            // Restart queued buffers on the new sink at their current positions
             for buf in &inner.queue {
-                let buffer = SamplesBuffer::new(buf.channels, buf.sample_rate, (*buf.data).clone());
-                new_sink.append::<SamplesBuffer<f32>>(buffer);
+                let source = ResumableSource {
+                    channels: buf.channels,
+                    sample_rate: buf.sample_rate,
+                    data: buf.data.clone(),
+                    pos: buf.pos.clone(),
+                };
+                new_sink.append(source);
             }
+
+            if paused {
+                new_sink.pause();
+            }
+
             inner.sink.stop();
             inner._stream = stream;
             inner.sink = new_sink;
@@ -68,7 +119,7 @@ impl DefaultDeviceSink {
     }
 
     /// Appends a source to the sink, ensuring that the default device is current.
-    pub fn append<T>(&self, source: T)
+    pub fn append<T>(&self, input: T)
     where
         T: Source + Send + 'static,
         T::Item: rodio::Sample + Send,
@@ -76,17 +127,25 @@ impl DefaultDeviceSink {
     {
         let mut inner = self.inner.lock().unwrap();
         Self::ensure_device(&mut inner);
-        let channels = source.channels();
-        let sample_rate = source.sample_rate();
-        let samples: Vec<f32> = source.convert_samples().collect();
+        let channels = input.channels();
+        let sample_rate = input.sample_rate();
+        let samples: Vec<f32> = input.convert_samples().collect();
         let arc = Arc::new(samples);
-        let buffer = SamplesBuffer::new(channels, sample_rate, (*arc).clone());
-        inner.queue.push_back(AudioBuffer {
+        let pos = Arc::new(AtomicUsize::new(0));
+        let buf = AudioBuffer {
             channels,
             sample_rate,
             data: arc.clone(),
-        });
-        inner.sink.append::<SamplesBuffer<f32>>(buffer);
+            pos: pos.clone(),
+        };
+        let source = ResumableSource {
+            channels,
+            sample_rate,
+            data: arc,
+            pos,
+        };
+        inner.queue.push_back(buf);
+        inner.sink.append::<ResumableSource>(source);
     }
 
     /// Stops playback and clears queued sounds.
