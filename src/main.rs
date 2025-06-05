@@ -49,6 +49,7 @@ mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
 use timers::AudibleTimers;
+use crate::default_device_sink::DefaultDeviceSink;
 mod options;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};

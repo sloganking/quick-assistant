@@ -186,22 +186,26 @@ pub mod ss {
             .build()
             .unwrap();
 
-        let response =
+        let response_result =
             match future::timeout(Duration::from_secs(15), client.audio().speech(request)).await {
-                Ok(transcription_result) => transcription_result,
+                Ok(res) => res,
                 Err(err) => {
                     println_error(&format!(
                         "Failed to turn text to speech due to timeout: {:?}",
                         err
                     ));
 
-                    // play_audio(&failed_temp_file.path());
-
-                    // continue;
                     return None;
                 }
+            };
+
+        let response = match response_result {
+            Ok(res) => res,
+            Err(err) => {
+                println_error(&format!("Failed to turn text to speech: {:?}", err));
+                return None;
             }
-            .unwrap();
+        };
 
         let ai_speech_segment_tempfile = Builder::new()
             .prefix("ai-speech-segment")
@@ -210,22 +214,28 @@ pub mod ss {
             .tempfile()
             .unwrap();
 
-        let _ = match future::timeout(
+        match future::timeout(
             Duration::from_secs(10),
             response.save(ai_speech_segment_tempfile.path()),
         )
         .await
         {
-            Ok(transcription_result) => transcription_result,
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                println_error(&format!(
+                    "Failed to save ai speech to file: {:?}",
+                    err
+                ));
+                return None;
+            }
             Err(err) => {
                 println_error(&format!(
                     "Failed to save ai speech to file due to timeout: {:?}",
                     err
                 ));
-
                 return None;
             }
-        };
+        }
 
         if speed != 1.0 {
             let sped_up_audio_path = Builder::new()
