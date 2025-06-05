@@ -38,6 +38,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rdev::{listen, Event};
+use crate::default_device_sink::DefaultDeviceSink;
 use record::rec;
 use std::error::Error;
 use std::sync::LazyLock;
@@ -711,8 +712,7 @@ static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(||
     // by passing an audio file path to a function. But the audio playing function needs to
     // have the sink and stream variable not be dropped after the end of the function.
     thread::spawn(move || {
-        let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-        let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+        let sink = DefaultDeviceSink::new();
 
         for audio_path in audio_playing_rx.iter() {
             let file = std::fs::File::open(audio_path).unwrap();
