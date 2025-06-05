@@ -42,8 +42,27 @@ pub fn set_volume(value: u32) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+/// Returns the current master system volume on Windows as a value from 0 to 100.
+pub fn get_volume() -> Result<u32, String> {
+    unsafe {
+        let endpoint = get_default_endpoint()?;
+        let vol = endpoint
+            .GetMasterVolumeLevelScalar()
+            .map_err(|e| format!("GetMasterVolumeLevelScalar failed: {e}"))?;
+        CoUninitialize();
+        Ok((vol * 100.0).round() as u32)
+    }
+}
+
 #[cfg(not(target_os = "windows"))]
 /// Stub for non-Windows platforms.
 pub fn set_volume(_value: u32) -> Result<(), String> {
     Err("set_volume is only supported on Windows".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+/// Stub for non-Windows platforms.
+pub fn get_volume() -> Result<u32, String> {
+    Err("get_volume is only supported on Windows".to_string())
 }
