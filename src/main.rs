@@ -50,6 +50,8 @@ use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
 use timers::AudibleTimers;
 mod options;
+#[cfg(target_os = "windows")]
+mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -216,6 +218,22 @@ fn call_fn(
             }
 
             None
+        }
+        "set_volume" => {
+            info!("Handling set_volume function call.");
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            let volume = args["volume"].as_u64().unwrap_or(0) as u32;
+            #[cfg(target_os = "windows")]
+            {
+                match windows_volume::set_volume(volume) {
+                    Ok(_) => Some(format!("Volume set to {}", volume)),
+                    Err(e) => Some(format!("Failed to set volume: {}", e)),
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Some("set_volume is only supported on Windows".to_string())
+            }
         }
         "open_application" => {
             info!("Handling open_application function call.");
@@ -1162,6 +1180,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             "media_button": { "type": "string", "enum": ["MediaStop", "MediaNextTrack", "MediaPlayPause", "MediaPrevTrack", "VolumeUp", "VolumeDown", "VolumeMute"] },
                                         },
                                         "required": ["media_button"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("set_volume")
+                                    .description("Sets the system volume on Windows to a value between 0 and 100.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "volume": { "type": "integer" } },
+                                        "required": ["volume"],
                                     }))
                                     .build().unwrap(),
 
