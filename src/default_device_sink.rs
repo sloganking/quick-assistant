@@ -1,7 +1,10 @@
-use std::collections::VecDeque;
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{OutputStream, Sink, Source};
+use std::collections::VecDeque;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
 
 struct AudioBuffer {
     channels: u16,
@@ -27,9 +30,15 @@ impl Iterator for ResumableSource {
 }
 
 impl Source for ResumableSource {
-    fn current_frame_len(&self) -> Option<usize> { None }
-    fn channels(&self) -> u16 { self.channels }
-    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
     fn total_duration(&self) -> Option<std::time::Duration> {
         let len = self.data.len() as f32 / self.channels as f32 / self.sample_rate as f32;
         Some(std::time::Duration::from_secs_f32(len))
@@ -60,8 +69,8 @@ pub struct DefaultDeviceSink {
 impl DefaultDeviceSink {
     /// Creates a new `DefaultDeviceSink` using the system default output device.
     pub fn new() -> Self {
-        let (stream, handle) = OutputStream::try_default()
-            .expect("Failed to open default output stream");
+        let (stream, handle) =
+            OutputStream::try_default().expect("Failed to open default output stream");
         let sink = Sink::try_new(&handle).expect("Failed to create Sink");
         let name = default_device_name();
         DefaultDeviceSink {
@@ -90,8 +99,8 @@ impl DefaultDeviceSink {
             let speed = inner.sink.speed();
             let paused = inner.sink.is_paused();
 
-            let (stream, handle) = OutputStream::try_default()
-                .expect("Failed to open default output stream");
+            let (stream, handle) =
+                OutputStream::try_default().expect("Failed to open default output stream");
             let mut new_sink = Sink::try_new(&handle).expect("Failed to create Sink");
             new_sink.set_volume(volume);
             new_sink.set_speed(speed);
@@ -226,4 +235,3 @@ impl DefaultDeviceSink {
         inner.sink.set_speed(value);
     }
 }
-

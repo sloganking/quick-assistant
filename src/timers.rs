@@ -12,8 +12,8 @@ use std::{
 };
 use tracing::{info, warn};
 
-use crate::CACHE_DIR;
 use crate::default_device_sink::DefaultDeviceSink;
+use crate::CACHE_DIR;
 
 // Global atomic ID counter for timers
 static NEXT_ID: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(1));

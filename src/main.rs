@@ -1,6 +1,7 @@
 use anyhow::Context;
 use async_openai::types::{
-    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs, ChatCompletionRequestToolMessageArgs, FinishReason
+    ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs,
+    ChatCompletionRequestToolMessageArgs, FinishReason,
 };
 use clipboard::{ClipboardContext, ClipboardProvider};
 use dotenvy::dotenv;
@@ -16,9 +17,9 @@ use timers::*;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
+mod default_device_sink;
 mod timers;
 mod transcribe;
-mod default_device_sink;
 use chrono::{DateTime, Local};
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
@@ -90,10 +91,7 @@ enum Message {
     User { content: String },
     Assistant { content: String },
     Tool { content: String },
-    Function {
-        fn_name: String,
-        content: String,
-    },
+    Function { fn_name: String, content: String },
 }
 
 fn error_and_panic(s: &str) -> ! {
@@ -144,7 +142,11 @@ fn set_screen_brightness(brightness: u32) -> Option<()> {
 }
 
 #[instrument]
-fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>) -> Option<String>{
+fn call_fn(
+    fn_name: &str,
+    fn_args: &str,
+    llm_messages_tx: flume::Sender<Message>,
+) -> Option<String> {
     let mut enigo = Enigo::new();
 
     println!("{}{}", "Invoking function: ".purple(), fn_name);
@@ -297,7 +299,6 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
         }
 
         "speedtest" => {
-
             llm_messages_tx.send(
                 Message::Function {
                     content: "Speed test has been successfully started. It takes several seconds. The results will be shared once the speedtest is complete.".to_string(),
@@ -306,28 +307,26 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
             ).unwrap();
 
             let thread_fn_name = fn_name.to_string();
-            thread::spawn(move || {
-                match speedtest() {
-                    Ok(answer) => {
-                        llm_messages_tx.send(
-                            Message::Function {
-                                content: format!("Speedtest results: {}", answer),
-                                fn_name: thread_fn_name,
-                            }
-                        ).unwrap();
-                    },
-                    Err(err) => {
-                        llm_messages_tx.send(
-                            Message::Function {
-                                content: format!("Speedtest failed with error: {}", err),
-                                fn_name: thread_fn_name,
-                            }
-                        ).unwrap();
-                    },
+            thread::spawn(move || match speedtest() {
+                Ok(answer) => {
+                    llm_messages_tx
+                        .send(Message::Function {
+                            content: format!("Speedtest results: {}", answer),
+                            fn_name: thread_fn_name,
+                        })
+                        .unwrap();
+                }
+                Err(err) => {
+                    llm_messages_tx
+                        .send(Message::Function {
+                            content: format!("Speedtest failed with error: {}", err),
+                            fn_name: thread_fn_name,
+                        })
+                        .unwrap();
                 }
             });
             None
-        },
+        }
 
         "set_timer_at" => {
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
@@ -336,7 +335,6 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
             match time_str.parse::<DateTime<Local>>() {
                 Ok(timestamp) => match set_timer(description.to_string(), timestamp) {
                     Ok(_) => {
-
                         let success_response_message = {
                             let time_diff = timestamp.signed_duration_since(Local::now());
 
@@ -353,13 +351,15 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
                             let duration_sec = std::time::Duration::new(duration_std.as_secs(), 0);
 
                             // Convert to a human-readable string with second precision
-                            let time_diff_str = humantime::format_duration(duration_sec).to_string();
+                            let time_diff_str =
+                                humantime::format_duration(duration_sec).to_string();
 
                             format!("Successfully set timer to go off at: \"{}\" which is \"{}\" from now.", time_str, time_diff_str)
                         };
-                        
-                        Some(success_response_message)},
-                
+
+                        Some(success_response_message)
+                    }
+
                     Err(err) => Some(format!("Setting timer failed with error: {}", err)),
                 },
                 Err(err) => Some(format!(
@@ -411,10 +411,13 @@ fn call_fn(fn_name: &str, fn_args: &str, llm_messages_tx: flume::Sender<Message>
 
             match delete_timer(timer_id) {
                 Ok(_) => Some(format!("Successfully deleted timer with ID: {}", timer_id)),
-                Err(err) => Some(format!("Failed to delete timer with ID: {}. Error: {}", timer_id, err)),
+                Err(err) => Some(format!(
+                    "Failed to delete timer with ID: {}. Error: {}",
+                    timer_id, err
+                )),
             }
         }
-      
+
         "show_live_log_stream" => match get_currently_active_log_file() {
             Some(log_file) => match run_get_content_wait_on_file(&log_file) {
                 Ok(_) => Some("Successfully opened log file in powershell".to_string()),
@@ -576,7 +579,6 @@ fn get_system_processes() -> String {
     // Add "=> processes:" to info
     info.push_str("=> processes:\n");
 
-
     // Display processes ID, name, and disk usage:
     for (pid, process) in sys.processes() {
         let path_string = match process.exe() {
@@ -696,11 +698,8 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
     }
 }
 
-
-static FAILED_TEMP_FILE: LazyLock<NamedTempFile> = LazyLock::new(|| {
-    create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3")
-});
-           
+static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
+    LazyLock::new(|| create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3"));
 
 /// A global, lazily-initialized closure for sending paths into a channel.
 static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(|| {
@@ -711,7 +710,7 @@ static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(||
     // Playing audio has it's own dedicated thread because I wanted to be able to play audio
     // by passing an audio file path to a function. But the audio playing function needs to
     // have the sink and stream variable not be dropped after the end of the function.
-    thread::spawn( move || {
+    thread::spawn(move || {
         let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
 
@@ -728,7 +727,6 @@ static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(||
         audio_playing_tx.send(path.to_path_buf()).unwrap();
     })
 });
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -829,8 +827,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 include_bytes!("../assets/Dreaming of Victory.mp3"),
                 ".mp3",
             );
-            let (audible_timers, expired_timers_rx) = AudibleTimers::new(alarm_temp_file.path().to_path_buf())
-                .expect("Failed to create audible_timers");
+            let (audible_timers, expired_timers_rx) =
+                AudibleTimers::new(alarm_temp_file.path().to_path_buf())
+                    .expect("Failed to create audible_timers");
 
             // Create audio recorder thread
             // This thread listens to the push to talk key and records audio when it's pressed.
@@ -844,7 +843,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let key_to_check = ptt_key;
                 let tmp_dir = tempdir().unwrap();
                 let mut voice_tmp_path_option: Option<PathBuf> = None;
-               
+
                 for event in key_handler_rx.iter() {
                     match event.event_type {
                         rdev::EventType::KeyPress(key) => {
@@ -939,7 +938,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             });
 
-            let (llm_messages_tx, llm_messages_rx): (flume::Sender<Message>, flume::Receiver<Message>) = flume::unbounded();
+            let (llm_messages_tx, llm_messages_rx): (
+                flume::Sender<Message>,
+                flume::Receiver<Message>,
+            ) = flume::unbounded();
 
             // Create timer to llm message thread
             // This thread listens to the expired timers channel and sends a message to the AI thread
@@ -972,7 +974,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for audio_path in recording_rx.iter() {
-
                     let mut thread_speak_stream = thread_speak_stream_mutex.lock().unwrap();
                     thread_speak_stream.stop_speech();
                     drop(thread_speak_stream);
@@ -1010,11 +1011,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
 
-                    thread_llm_messages_tx.send(
-                    Message::User {
+                    thread_llm_messages_tx
+                        .send(Message::User {
                             content: transcription,
-                        }
-                    ).unwrap();
+                        })
+                        .unwrap();
                 }
             });
 
@@ -1039,7 +1040,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap();
 
                 for llm_message in llm_messages_rx.iter() {
-
                     // convert message type to ChatCompletionRequestMessage
                     match llm_message {
                         Message::System { content } => {
@@ -1241,9 +1241,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": ["timer_id"],
                                     }))
                                     .build().unwrap(),
-                                    
-                              
-                              ChatCompletionFunctionsArgs::default()
+
+                                    ChatCompletionFunctionsArgs::default()
                                     .name("show_live_log_stream")
                                     .description("Shows live updates of the log file via opening powershell and running 'Get-Content -Path \"path/to/log/file\" -Wait'.")
                                     .parameters(json!({
@@ -1354,7 +1353,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         }
                                         if let Some(finish_reason) = &chat_choice.finish_reason {
                                             if matches!(finish_reason, FinishReason::FunctionCall) {
-                                                let func_response_option = call_fn(&fn_name, &fn_args, llm_messages_tx.clone());
+                                                let func_response_option = call_fn(
+                                                    &fn_name,
+                                                    &fn_args,
+                                                    llm_messages_tx.clone(),
+                                                );
 
                                                 if let Some(func_response) = func_response_option {
                                                     message_history.push(
