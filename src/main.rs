@@ -38,6 +38,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rdev::{listen, Event};
+use crate::default_device_sink::DefaultDeviceSink;
 use record::rec;
 use std::error::Error;
 use std::sync::LazyLock;
