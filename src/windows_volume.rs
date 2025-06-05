@@ -1,10 +1,7 @@
 #[cfg(target_os = "windows")]
-use windows::core::Interface;
+use windows::Win32::Media::Audio::{eConsole, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator};
 #[cfg(target_os = "windows")]
-use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioEndpointVolume, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator,
-};
+use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
@@ -13,7 +10,7 @@ use windows::Win32::System::Com::{
 #[cfg(target_os = "windows")]
 fn get_default_endpoint() -> Result<IAudioEndpointVolume, String> {
     unsafe {
-        CoInitializeEx(std::ptr::null_mut(), COINIT_MULTITHREADED)
+        CoInitializeEx(None, COINIT_MULTITHREADED)
             .map_err(|e| format!("CoInitializeEx failed: {e}"))?;
         let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
             .map_err(|e| format!("CoCreateInstance failed: {e}"))?;
@@ -21,7 +18,7 @@ fn get_default_endpoint() -> Result<IAudioEndpointVolume, String> {
             .GetDefaultAudioEndpoint(eRender, eConsole)
             .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e}"))?;
         let endpoint: IAudioEndpointVolume = device
-            .Activate(CLSCTX_ALL, std::ptr::null_mut())
+            .Activate::<IAudioEndpointVolume>(CLSCTX_ALL, None)
             .map_err(|e| format!("Activate failed: {e}"))?;
         Ok(endpoint)
     }
