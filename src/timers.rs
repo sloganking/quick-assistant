@@ -13,6 +13,7 @@ use std::{
 use tracing::{info, warn};
 
 use crate::CACHE_DIR;
+use crate::default_device_sink::DefaultDeviceSink;
 
 // Global atomic ID counter for timers
 static NEXT_ID: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(1));
@@ -140,8 +141,7 @@ impl AudibleTimers {
             flume::unbounded();
 
         thread::spawn(move || {
-            let (_stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-            let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+            let sink = DefaultDeviceSink::new();
 
             let mut timer_error_was_logged = false;
 
