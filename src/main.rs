@@ -25,7 +25,12 @@ use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
 mod record;
-use crate::default_device_sink::DefaultDeviceSink;
+use crate::default_device_sink::{
+    default_device_name as get_default_output_device,
+    list_output_devices as list_audio_output_devices,
+    set_output_device,
+    DefaultDeviceSink,
+};
 use async_openai::{
     types::{
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -503,6 +508,36 @@ fn call_fn(
             let mut speak_stream = speak_stream_mutex.lock().unwrap();
             speak_stream.unmute();
             Some("AI voice unmuted".to_string())
+        }
+
+        "list_output_devices" => {
+            let default = get_default_output_device().unwrap_or_else(|| "Unknown".to_string());
+            let mut devices = list_audio_output_devices();
+            devices.sort();
+            let mut info = String::from("Available Output Devices:\n");
+            info.push_str("* Default Audio Output Device\n");
+            for d in devices {
+                if d == default {
+                    info.push_str(&format!("* {} (Default)\n", d));
+                } else {
+                    info.push_str(&format!("* {}\n", d));
+                }
+            }
+            Some(info)
+        }
+
+        "set_output_device" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            if let Some(name) = args["device_name"].as_str() {
+                if name == "Default Audio Output Device" {
+                    set_output_device(None);
+                } else {
+                    set_output_device(Some(name.to_string()));
+                }
+                Some(format!("Output device set to {}", name))
+            } else {
+                Some("Missing 'device_name' argument".to_string())
+            }
         }
 
         _ => {
@@ -1370,6 +1405,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("list_output_devices")
+                                    .description("Lists available audio output devices. The default device is marked with '(Default)'.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("set_output_device")
+                                    .description("Sets the audio output device by name. Pass 'Default Audio Output Device' to use the system default.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "device_name": { "type": "string" } },
+                                        "required": ["device_name"],
                                     }))
                                     .build().unwrap(),
                             ])
