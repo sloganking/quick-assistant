@@ -10,9 +10,11 @@ pub mod ss {
 
     use crate::default_device_sink::DefaultDeviceSink;
     use crate::FAILED_TEMP_FILE;
-    use std::io::BufReader;
+    use std::fs::File;
+    use std::io::{BufReader, Write};
     use std::path::Path;
     use std::process::Command;
+    use std::sync::LazyLock;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
@@ -21,6 +23,23 @@ pub mod ss {
 
     use tracing::info;
     use tracing::{debug, warn};
+
+    fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
+        let temp_file = Builder::new()
+            .prefix("temp-file")
+            .suffix(extension)
+            .rand_bytes(16)
+            .tempfile()
+            .unwrap();
+
+        let mut file = File::create(temp_file.path()).unwrap();
+        file.write_all(bytes).unwrap();
+
+        temp_file
+    }
+
+    static TICK_TEMP_FILE: LazyLock<NamedTempFile> =
+        LazyLock::new(|| create_temp_file_from_bytes(include_bytes!("../assets/tick.mp3"), ".mp3"));
 
     use crate::error_and_panic;
     use crate::truncate;
@@ -284,7 +303,11 @@ pub mod ss {
     }
 
     impl SpeakStream {
-        pub fn new(voice: Voice, speech_speed: f32) -> (Self, flume::Receiver<SpeakState>) {
+        pub fn new(
+            voice: Voice,
+            speech_speed: f32,
+            tick: bool,
+        ) -> (Self, flume::Receiver<SpeakState>) {
             // The maximum number of audio files that can be queued up to be played by the AI voice audio
             // playing thread Limiting this number prevents converting too much text to speech at once and
             // incurring large API costs for conversions that may not be used if speaking is stopped.
@@ -455,6 +478,45 @@ pub mod ss {
                     }
                 }
             });
+
+            if tick {
+                let state_rx_tick = state_rx.clone();
+                thread::spawn(move || {
+                    let tick_sink = DefaultDeviceSink::new();
+                    let tick_path = TICK_TEMP_FILE.path().to_path_buf();
+                    let mut should_tick = false;
+                    let mut has_spoken = false;
+                    loop {
+                        match state_rx_tick.recv_timeout(Duration::from_millis(100)) {
+                            Ok(SpeakState::Converting) => {
+                                if !has_spoken {
+                                    should_tick = true;
+                                }
+                            }
+                            Ok(SpeakState::Playing) => {
+                                has_spoken = true;
+                                should_tick = false;
+                                tick_sink.stop();
+                            }
+                            Ok(SpeakState::Idle) => {
+                                has_spoken = false;
+                                should_tick = false;
+                                tick_sink.stop();
+                            }
+                            Err(flume::RecvTimeoutError::Disconnected) => break,
+                            Err(flume::RecvTimeoutError::Timeout) => {}
+                        }
+
+                        if should_tick && tick_sink.empty() {
+                            if let Ok(file) = std::fs::File::open(&tick_path) {
+                                tick_sink.stop();
+                                tick_sink
+                                    .append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                            }
+                        }
+                    }
+                });
+            }
 
             (
                 SpeakStream {
