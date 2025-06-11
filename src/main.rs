@@ -384,7 +384,11 @@ fn call_fn(
             let query = args["query"].as_str().unwrap_or("");
             match tokio::runtime::Runtime::new() {
                 Ok(rt) => match rt.block_on(web_search(query)) {
-                    Ok(results) => Some(results),
+                    Ok(results) => {
+                        println!("{}{}", "web search results: ".purple(), results);
+                        info!("Web search results: {}", results);
+                        Some(results)
+                    }
                     Err(err) => Some(format!("Web search failed: {}", err)),
                 },
                 Err(err) => Some(format!("Failed to create runtime: {}", err)),
