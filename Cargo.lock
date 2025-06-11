@@ -4060,6 +4060,7 @@ dependencies = [
  "futures",
  "hound",
  "humantime",
+ "once_cell",
  "open",
  "rdev",
  "reqwest",

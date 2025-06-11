@@ -1,10 +1,14 @@
 use cpal::traits::{DeviceTrait, HostTrait};
+use once_cell::sync::Lazy;
 use rodio::{OutputStream, Sink, Source};
 use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
+
+/// Globally selected output device name. `None` means use the system default.
+pub static SELECTED_OUTPUT_DEVICE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 struct AudioBuffer {
     channels: u16,
@@ -46,10 +50,31 @@ impl Source for ResumableSource {
 }
 
 /// Returns the name of the current default output device, if any.
-fn default_device_name() -> Option<String> {
+pub fn default_device_name() -> Option<String> {
     cpal::default_host()
         .default_output_device()
         .and_then(|d| d.name().ok())
+}
+
+/// Returns a list of available output device names.
+pub fn list_output_devices() -> Vec<String> {
+    let host = cpal::default_host();
+    match host.output_devices() {
+        Ok(devices) => devices
+            .filter_map(|d| d.name().ok())
+            .collect::<Vec<_>>(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Set the globally selected output device. Pass `None` to use the system default.
+pub fn set_output_device(device: Option<String>) {
+    *SELECTED_OUTPUT_DEVICE.lock().unwrap() = device;
+}
+
+/// Returns the currently selected output device. `None` means the system default.
+pub fn get_output_device() -> Option<String> {
+    SELECTED_OUTPUT_DEVICE.lock().unwrap().clone()
 }
 
 struct Inner {
@@ -67,12 +92,36 @@ pub struct DefaultDeviceSink {
 }
 
 impl DefaultDeviceSink {
-    /// Creates a new `DefaultDeviceSink` using the system default output device.
-    pub fn new() -> Self {
+    fn create_stream() -> (OutputStream, Sink, Option<String>) {
+        if let Some(selected) = get_output_device() {
+            let host = cpal::default_host();
+            if let Ok(devices) = host.output_devices() {
+                for device in devices {
+                    if let Ok(device_name) = device.name() {
+                        if device_name == selected {
+                            if let Ok((stream, handle)) =
+                                OutputStream::try_from_device(&device)
+                            {
+                                let sink = Sink::try_new(&handle)
+                                    .expect("Failed to create Sink");
+                                return (stream, sink, Some(device_name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let (stream, handle) =
             OutputStream::try_default().expect("Failed to open default output stream");
         let sink = Sink::try_new(&handle).expect("Failed to create Sink");
         let name = default_device_name();
+        (stream, sink, name)
+    }
+
+    /// Creates a new `DefaultDeviceSink` using the system default output device.
+    pub fn new() -> Self {
+        let (stream, sink, name) = Self::create_stream();
         DefaultDeviceSink {
             inner: Arc::new(Mutex::new(Inner {
                 _stream: stream,
@@ -93,15 +142,18 @@ impl DefaultDeviceSink {
 
     fn ensure_device(inner: &mut Inner) {
         Self::sync_queue(inner);
-        let current = default_device_name();
-        if current != inner.device_name {
+
+        let desired = match get_output_device() {
+            Some(name) => Some(name),
+            None => default_device_name(),
+        };
+
+        if desired != inner.device_name {
             let volume = inner.sink.volume();
             let speed = inner.sink.speed();
             let paused = inner.sink.is_paused();
 
-            let (stream, handle) =
-                OutputStream::try_default().expect("Failed to open default output stream");
-            let mut new_sink = Sink::try_new(&handle).expect("Failed to create Sink");
+            let (stream, mut new_sink, name) = Self::create_stream();
             new_sink.set_volume(volume);
             new_sink.set_speed(speed);
 
@@ -123,7 +175,7 @@ impl DefaultDeviceSink {
             inner.sink.stop();
             inner._stream = stream;
             inner.sink = new_sink;
-            inner.device_name = current;
+            inner.device_name = name;
         }
     }
 
