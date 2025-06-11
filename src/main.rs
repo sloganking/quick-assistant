@@ -222,9 +222,9 @@ fn call_fn(
         "set_volume" => {
             info!("Handling set_volume function call.");
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
-            let volume = args["volume"].as_u64().unwrap_or(0) as u32;
             #[cfg(target_os = "windows")]
             {
+                let volume = args["volume"].as_u64().unwrap_or(0) as u32;
                 match windows_volume::set_volume(volume) {
                     Ok(_) => Some(format!("Volume set to {}", volume)),
                     Err(e) => Some(format!("Failed to set volume: {}", e)),
@@ -232,6 +232,7 @@ fn call_fn(
             }
             #[cfg(not(target_os = "windows"))]
             {
+                let _ = args; // avoid unused variable warning
                 Some("set_volume is only supported on Windows".to_string())
             }
         }
