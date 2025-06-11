@@ -14,12 +14,7 @@ A push-to-talk AI voice assistant for your desktop.
 
 quick-assistant is a CLI program for your desktop. It lets you hold a key and talk to a GPT-4 Turbo–powered assistant anytime. Responses come in text and voice, so conversations feel natural. The AI can be interrupted mid-sentence when you need to redirect it.
 
-![demo](https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5-9ee9-dd9f9d56ea95)
-
-## Table of Contents
-- [Features](#features)
-- [Setup](#setup)
-- [Usage](#usage)
+https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5-9ee9-dd9f9d56ea95
 
 ## Features
 
@@ -27,8 +22,11 @@ quick-assistant is a CLI program for your desktop. It lets you hold a key and ta
 - 🔊 **System volume** adjustment (Windows only)
 - ⏯️ **Media playback** commands
 - 🚀 **Launch applications** from voice
-- 📋 **Clipboard** management
-- 🗑️ **Manage processes** by voice
+- 📑 **Display log files** for troubleshooting
+- 🖥️ **Get system info** on demand
+- 🗑️ **List and kill processes** by voice
+- 🌐 **Run internet speed tests**
+- 📋 **Set the clipboard** contents
 - ⏱️ **Timers** with alarm sounds
 - 🎙️ **Change voice** or speaking speed on the fly
 - 🔕 **Mute/unmute** the voice output
