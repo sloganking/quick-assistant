@@ -299,14 +299,11 @@ pub mod ss {
         ai_audio_playing_rx: flume::Receiver<AudioTask>,
         speech_speed: Arc<Mutex<f32>>,
         state_tx: flume::Sender<SpeakState>,
+        muted: bool,
     }
 
     impl SpeakStream {
-        pub fn new(
-            voice: Voice,
-            speech_speed: f32,
-            tick: bool,
-        ) -> Self {
+        pub fn new(voice: Voice, speech_speed: f32, tick: bool) -> Self {
             // The maximum number of audio files that can be queued up to be played by the AI voice audio
             // playing thread Limiting this number prevents converting too much text to speech at once and
             // incurring large API costs for conversions that may not be used if speaking is stopped.
@@ -525,10 +522,15 @@ pub mod ss {
                 ai_audio_playing_rx,
                 speech_speed,
                 state_tx,
+                muted: false,
             }
         }
 
         pub fn add_token(&mut self, token: &str) {
+            if self.muted {
+                return;
+            }
+
             // Add the token to the sentence accumulator
             let sentences = self.sentence_accumulator.add_token(token);
             for sentence in sentences {
@@ -537,6 +539,11 @@ pub mod ss {
         }
 
         pub fn complete_sentence(&mut self) {
+            if self.muted {
+                self.sentence_accumulator.clear_buffer();
+                return;
+            }
+
             // Process the last sentence
             if let Some(sentence) = self.sentence_accumulator.complete_sentence() {
                 self.ai_tts_tx.send(sentence).unwrap();
@@ -574,5 +581,17 @@ pub mod ss {
             self.speech_speed.lock().map(|s| *s).unwrap_or(1.0)
         }
 
+        pub fn mute(&mut self) {
+            self.muted = true;
+            self.stop_speech();
+        }
+
+        pub fn unmute(&mut self) {
+            self.muted = false;
+        }
+
+        pub fn is_muted(&self) -> bool {
+            self.muted
+        }
     }
 }

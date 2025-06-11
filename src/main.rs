@@ -493,6 +493,18 @@ fn call_fn(
             ))
         }
 
+        "mute_speech" => {
+            let mut speak_stream = speak_stream_mutex.lock().unwrap();
+            speak_stream.mute();
+            Some("AI voice muted".to_string())
+        }
+
+        "unmute_speech" => {
+            let mut speak_stream = speak_stream_mutex.lock().unwrap();
+            speak_stream.unmute();
+            Some("AI voice unmuted".to_string())
+        }
+
         _ => {
             println!("Unknown function: {}", fn_name);
             warn!("AI called unknown function: {}", fn_name);
@@ -785,7 +797,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick);
+    let mut speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick);
+    if opt.mute {
+        speak_stream.mute();
+    }
     let speak_stream_mutex = Arc::new(Mutex::new(speak_stream));
 
     match opt.subcommands {
@@ -1331,6 +1346,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("get_speech_speed")
                                     .description("Returns the current AI voice speech speed.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("mute_speech")
+                                    .description("Mutes the AI voice so no speech is played.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("unmute_speech")
+                                    .description("Unmutes the AI voice so responses are spoken again.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
