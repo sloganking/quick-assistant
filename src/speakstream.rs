@@ -10,6 +10,7 @@ pub mod ss {
 
     use crate::default_device_sink::DefaultDeviceSink;
     use crate::FAILED_TEMP_FILE;
+    use crate::PLAY_AUDIO;
     use std::fs::File;
     use std::io::{BufReader, Write};
     use std::path::Path;
@@ -213,6 +214,7 @@ pub mod ss {
                         "Failed to turn text to speech due to timeout: {:?}",
                         err
                     ));
+                    PLAY_AUDIO(FAILED_TEMP_FILE.path());
                     return None;
                 }
             };
@@ -221,6 +223,7 @@ pub mod ss {
             Ok(res) => res,
             Err(err) => {
                 println_error(&format!("Failed to turn text to speech: {:?}", err));
+                PLAY_AUDIO(FAILED_TEMP_FILE.path());
                 return None;
             }
         };
@@ -241,6 +244,7 @@ pub mod ss {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 println_error(&format!("Failed to save ai speech to file: {:?}", err));
+                PLAY_AUDIO(FAILED_TEMP_FILE.path());
                 return None;
             }
             Err(err) => {
@@ -248,6 +252,7 @@ pub mod ss {
                     "Failed to save ai speech to file due to timeout: {:?}",
                     err
                 ));
+                PLAY_AUDIO(FAILED_TEMP_FILE.path());
                 return None;
             }
         }
