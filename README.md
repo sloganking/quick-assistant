@@ -12,6 +12,7 @@ https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5
 The assistant has functions for controlling the desktop. Such as:
 
 - Setting screen brightness
+- Adjusting system volume to a specific level (Windows only)
 - Media playback control
 - Launching applications
 - Display its own log files
