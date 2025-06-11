@@ -33,6 +33,10 @@ pub struct Opt {
     #[arg(long)]
     pub tick: bool,
 
+    /// Start with the AI voice muted.
+    #[arg(long)]
+    pub mute: bool,
+
     /// The voice that the AI will use to speak.
     /// Choose from a list of available voices to customize the output.
     #[arg(long)]
