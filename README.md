@@ -1,34 +1,52 @@
-# quick-assistant
+# Quick Assistant
+
+```
+   ____        _      __      ___              _      __              __
+  / __ \__  __(_)____/ /__   /   |  __________(_)____/ /_____ _____  / /_
+ / / / / / / / / ___/ //_/  / /| | / ___/ ___/ / ___/ __/ __ `/ __ \/ __/
+/ /_/ / /_/ / / /__/ ,<    / ___ |(__  |__  ) (__  ) /_/ /_/ / / / / /_
+\___\_\__,_/_/\___/_/|_|  /_/  |_/____/____/_/____/\__/\__,_/_/ /_/\__/
+```
+
+[![Build Status](https://github.com/sloganking/quick-assistant/actions/workflows/rust.yml/badge.svg)](https://github.com/sloganking/quick-assistant/actions/workflows/rust.yml)
 
 A push-to-talk AI voice assistant for your desktop.
 
-`quick-assistant` is a CLI program for your desktop. It allows the user to use a pre-designated push-to-talk key to talk to a GPT-4 Turbo–enabled AI assistant at any time. The assistant can respond in both text and voice, enabling natural-sounding interaction. The AI can be interrupted even while speaking for easy modification and continuation of the conversation.
+quick-assistant is a CLI program for your desktop. It lets you hold a key and talk to a GPT-4 Turbo–powered assistant anytime. Responses come in text and voice, so conversations feel natural. The AI can be interrupted mid-sentence when you need to redirect it.
 
-https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5-9ee9-dd9f9d56ea95
+![demo](https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5-9ee9-dd9f9d56ea95)
 
+## Table of Contents
+- [Features](#features)
+- [Setup](#setup)
+- [Usage](#usage)
 
 ## Features
 
-The assistant has functions for controlling the desktop. Such as:
-
-- Setting screen brightness
-- Adjusting system volume to a specific level (Windows only)
-- Media playback control
-- Launching applications
-- Display its own log files
-- Get system information
-- List and kill system processes
-- Run internet speed tests
-- Set timers that end in alarm sounds
-- Set the system clipboard
-- Change the AI voice speed during conversation
-- Change the AI voice during conversation
-- Mute or unmute the AI voice during conversation (use `--mute` to start muted)
+- 🌞 **Screen brightness** control
+- 🔊 **System volume** adjustment (Windows only)
+- ⏯️ **Media playback** commands
+- 🚀 **Launch applications** from voice
+- 📋 **Clipboard** management
+- 🗑️ **Manage processes** by voice
+- ⏱️ **Timers** with alarm sounds
+- 🎙️ **Change voice** or speaking speed on the fly
+- 🔕 **Mute/unmute** the voice output
 
 ## Setup
 
-Run the setup script to install system dependencies:
+> **Note**: Run the setup script first to install system dependencies.
+>
+> ```bash
+> ./setup.sh
+> ```
+
+## Usage
+
+Start the assistant with cargo:
 
 ```bash
-./setup.sh
+cargo run --release
 ```
+
+Use `--help` for more options.
