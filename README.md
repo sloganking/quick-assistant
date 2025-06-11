@@ -22,6 +22,7 @@ The assistant has functions for controlling the desktop. Such as:
 - Set timers that end in alarm sounds
 - Set the system clipboard
 - Change the AI voice speed during conversation
+- Change the AI voice during conversation
 - Mute or unmute the AI voice during conversation (use `--mute` to start muted)
 
 ## Setup

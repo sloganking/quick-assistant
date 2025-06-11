@@ -116,6 +116,30 @@ fn truncate(s: &str, len: usize) -> String {
     }
 }
 
+fn parse_voice(name: &str) -> Option<Voice> {
+    match name.to_lowercase().as_str() {
+        "alloy" => Some(Voice::Alloy),
+        "echo" => Some(Voice::Echo),
+        "fable" => Some(Voice::Fable),
+        "onyx" => Some(Voice::Onyx),
+        "nova" => Some(Voice::Nova),
+        "shimmer" => Some(Voice::Shimmer),
+        _ => None,
+    }
+}
+
+fn voice_to_str(voice: &Voice) -> &'static str {
+    match voice {
+        Voice::Alloy => "alloy",
+        Voice::Echo => "echo",
+        Voice::Fable => "fable",
+        Voice::Onyx => "onyx",
+        Voice::Nova => "nova",
+        Voice::Shimmer => "shimmer",
+        _ => "unknown",
+    }
+}
+
 fn println_error(err: &str) {
     println!("{}: {}", "Error".truecolor(255, 0, 0), err);
     warn!("{}", err);
@@ -516,6 +540,27 @@ fn call_fn(
             let mut speak_stream = speak_stream_mutex.lock().unwrap();
             speak_stream.unmute();
             Some("AI voice unmuted".to_string())
+        }
+
+        "set_voice" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            if let Some(name) = args["voice"].as_str() {
+                if let Some(v) = parse_voice(name) {
+                    let speak_stream = speak_stream_mutex.lock().unwrap();
+                    speak_stream.set_voice(v);
+                    Some(format!("Voice set to {}", name.to_lowercase()))
+                } else {
+                    Some("Invalid voice name".to_string())
+                }
+            } else {
+                Some("Missing 'voice' argument".to_string())
+            }
+        }
+
+        "get_voice" => {
+            let speak_stream = speak_stream_mutex.lock().unwrap();
+            let name = voice_to_str(&speak_stream.get_voice());
+            Some(format!("Current voice is {}", name))
         }
 
         "list_output_devices" => {
@@ -1439,6 +1484,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("unmute_speech")
                                     .description("Unmutes the AI voice so responses are spoken again.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("set_voice")
+                                    .description("Changes the AI speaking voice. Pass one of: alloy, echo, fable, onyx, nova, shimmer.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "voice": { "type": "string" } },
+                                        "required": ["voice"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("get_voice")
+                                    .description("Returns the name of the current AI voice.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
