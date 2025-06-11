@@ -25,6 +25,7 @@ use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
 mod record;
+use crate::default_device_sink::DefaultDeviceSink;
 use async_openai::{
     types::{
         ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
@@ -38,7 +39,6 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rdev::{listen, Event};
-use crate::default_device_sink::DefaultDeviceSink;
 use record::rec;
 use std::error::Error;
 use std::sync::LazyLock;
@@ -487,7 +487,10 @@ fn call_fn(
 
         "get_speech_speed" => {
             let speak_stream = speak_stream_mutex.lock().unwrap();
-            Some(format!("Current speech speed is {}", speak_stream.get_speech_speed()))
+            Some(format!(
+                "Current speech speed is {}",
+                speak_stream.get_speech_speed()
+            ))
         }
 
         _ => {
@@ -743,6 +746,9 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
     LazyLock::new(|| create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3"));
 
+static TICK_TEMP_FILE: LazyLock<NamedTempFile> =
+    LazyLock::new(|| create_temp_file_from_bytes(include_bytes!("../assets/tick.mp3"), ".mp3"));
+
 /// A global, lazily-initialized closure for sending paths into a channel.
 static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(|| {
     // Create a channel for path buffers.
@@ -782,8 +788,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let (speak_stream, _speak_state_rx) = ss::SpeakStream::new(ai_voice, opt.speech_speed);
+    let (speak_stream, speak_state_rx) = ss::SpeakStream::new(ai_voice, opt.speech_speed);
     let speak_stream_mutex = Arc::new(Mutex::new(speak_stream));
+
+    if opt.tick {
+        let state_rx = speak_state_rx.clone();
+        thread::spawn(move || {
+            let tick_sink = DefaultDeviceSink::new();
+            let tick_path = TICK_TEMP_FILE.path().to_path_buf();
+            let mut should_tick = false;
+            let mut has_spoken = false;
+            loop {
+                match state_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(ss::SpeakState::Converting) => {
+                        if !has_spoken {
+                            should_tick = true;
+                        }
+                    }
+                    Ok(ss::SpeakState::Playing) => {
+                        has_spoken = true;
+                        should_tick = false;
+                        tick_sink.stop();
+                    }
+                    Ok(ss::SpeakState::Idle) => {
+                        has_spoken = false;
+                        should_tick = false;
+                        tick_sink.stop();
+                    }
+                    Err(flume::RecvTimeoutError::Disconnected) => break,
+                    Err(flume::RecvTimeoutError::Timeout) => {}
+                }
+
+                if should_tick && tick_sink.empty() {
+                    if let Ok(file) = std::fs::File::open(&tick_path) {
+                        tick_sink.stop();
+                        tick_sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+                    }
+                }
+            }
+        });
+    }
 
     match opt.subcommands {
         Some(subcommand) => {
