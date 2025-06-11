@@ -354,6 +354,14 @@ fn call_fn(
             None
         }
 
+        "get_location" => match tokio::runtime::Runtime::new() {
+            Ok(rt) => match rt.block_on(get_location()) {
+                Ok(loc) => Some(format!("Approximate location: {}", loc)),
+                Err(err) => Some(format!("Failed to get location: {}", err)),
+            },
+            Err(err) => Some(format!("Failed to create runtime: {}", err)),
+        },
+
         "set_timer_at" => {
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let time_str = args["time"].as_str().unwrap();
@@ -754,6 +762,36 @@ fn speedtest() -> Result<String, String> {
     };
 
     Ok(output)
+}
+
+async fn get_location() -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct ApiResponse {
+        city: Option<String>,
+        regionName: Option<String>,
+        country: Option<String>,
+        lat: Option<f64>,
+        lon: Option<f64>,
+    }
+
+    let resp = reqwest::get("http://ip-api.com/json")
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    let data: ApiResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let city = data.city.unwrap_or_default();
+    let region = data.regionName.unwrap_or_default();
+    let country = data.country.unwrap_or_default();
+    let lat = data.lat.unwrap_or_default();
+    let lon = data.lon.unwrap_or_default();
+
+    Ok(format!(
+        "{}, {}, {} ({}, {})",
+        city, region, country, lat, lon
+    ))
 }
 
 fn get_currently_active_log_file() -> Option<PathBuf> {
@@ -1401,6 +1439,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("unmute_speech")
                                     .description("Unmutes the AI voice so responses are spoken again.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+                              
+                              ChatCompletionFunctionsArgs::default()
+                                    .name("get_location")
+                                    .description("Returns an approximate location based on the machine's IP address.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
