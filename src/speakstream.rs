@@ -299,7 +299,6 @@ pub mod ss {
         ai_audio_playing_rx: flume::Receiver<AudioTask>,
         speech_speed: Arc<Mutex<f32>>,
         state_tx: flume::Sender<SpeakState>,
-        state_rx: flume::Receiver<SpeakState>,
     }
 
     impl SpeakStream {
@@ -307,7 +306,7 @@ pub mod ss {
             voice: Voice,
             speech_speed: f32,
             tick: bool,
-        ) -> (Self, flume::Receiver<SpeakState>) {
+        ) -> Self {
             // The maximum number of audio files that can be queued up to be played by the AI voice audio
             // playing thread Limiting this number prevents converting too much text to speech at once and
             // incurring large API costs for conversions that may not be used if speaking is stopped.
@@ -330,7 +329,7 @@ pub mod ss {
                 flume::Receiver<AudioTask>,
             ) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
-            let (state_tx, state_rx) = flume::unbounded();
+            let (state_tx, state_rx_tick) = flume::unbounded();
 
             let (futures_ordered_kill_tx, futures_ordered_kill_rx): (
                 flume::Sender<()>,
@@ -480,7 +479,6 @@ pub mod ss {
             });
 
             if tick {
-                let state_rx_tick = state_rx.clone();
                 thread::spawn(move || {
                     let tick_sink = DefaultDeviceSink::new();
                     let tick_path = TICK_TEMP_FILE.path().to_path_buf();
@@ -518,20 +516,16 @@ pub mod ss {
                 });
             }
 
-            (
-                SpeakStream {
-                    sentence_accumulator: SentenceAccumulator::new(),
-                    ai_tts_tx,
-                    ai_tts_rx,
-                    futures_ordered_kill_tx,
-                    stop_speech_tx,
-                    ai_audio_playing_rx,
-                    speech_speed,
-                    state_tx,
-                    state_rx: state_rx.clone(),
-                },
-                state_rx,
-            )
+            SpeakStream {
+                sentence_accumulator: SentenceAccumulator::new(),
+                ai_tts_tx,
+                ai_tts_rx,
+                futures_ordered_kill_tx,
+                stop_speech_tx,
+                ai_audio_playing_rx,
+                speech_speed,
+                state_tx,
+            }
         }
 
         pub fn add_token(&mut self, token: &str) {
@@ -580,8 +574,5 @@ pub mod ss {
             self.speech_speed.lock().map(|s| *s).unwrap_or(1.0)
         }
 
-        pub fn state_rx(&self) -> flume::Receiver<SpeakState> {
-            self.state_rx.clone()
-        }
     }
 }
