@@ -414,17 +414,18 @@ pub mod ss {
                             }
                             None => {
                                 println_error("failed to turn text to speech");
-                                let mut kill_signal_sent = false;
                                 for _ in futures_ordered_kill_rx.try_iter() {
                                     while let Ok(handle) = converting_rx.try_recv() {
                                         handle.abort();
                                     }
-                                    kill_signal_sent = true;
                                 }
 
-                                if !kill_signal_sent {
-                                    ai_audio_playing_tx.send(AudioTask::Error).unwrap();
-                                }
+                                // Any outstanding conversions are aborted above
+                                // when a push-to-talk kill signal is received,
+                                // so reaching this branch means the conversion
+                                // itself failed. Queue the error audio so it's
+                                // played in sequence with other speech.
+                                ai_audio_playing_tx.send(AudioTask::Error).unwrap();
                                 let _ = thread_state_tx.send(SpeakState::Idle);
                             }
                         }
