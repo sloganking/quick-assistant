@@ -45,8 +45,8 @@ pub struct Opt {
     /// The language model used to generate responses.
     /// Specify the name of the language model. For a list of available models, visit:
     /// https://platform.openai.com/docs/models/.
-    /// Defaults to "gpt-4o".
-    #[arg(long, default_value_t = String::from("gpt-4o"))]
+    /// Defaults to "gpt-4.1".
+    #[arg(long, default_value_t = String::from("gpt-4.1"))]
     pub model: String,
 
     #[clap(subcommand)]
