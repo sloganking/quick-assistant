@@ -213,7 +213,6 @@ pub mod ss {
                         "Failed to turn text to speech due to timeout: {:?}",
                         err
                     ));
-
                     return None;
                 }
             };
@@ -346,18 +345,23 @@ pub mod ss {
 
                 {
                     let converting_tx = converting_tx.clone();
+                    let thread_state_tx_inner = thread_state_tx.clone();
                     tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
                             let thread_voice = thread_voice.clone();
                             let thread_ai_text = ai_text.clone();
                             let thread_speech_speed = thread_speech_speed.clone();
-                            let state_tx = thread_state_tx.clone();
+                            let state_tx = thread_state_tx_inner.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
                                     let _ = state_tx.send(SpeakState::Converting);
                                     let speed = *thread_speech_speed.lock().unwrap();
-                                    turn_text_to_speech(thread_ai_text, speed, thread_voice)
+                                    turn_text_to_speech(
+                                        thread_ai_text,
+                                        speed,
+                                        thread_voice,
+                                    )
                                 }))
                                 .await
                                 .unwrap();
@@ -417,6 +421,7 @@ pub mod ss {
                                 if !kill_signal_sent {
                                     ai_audio_playing_tx.send(AudioTask::Error).unwrap();
                                 }
+                                let _ = thread_state_tx.send(SpeakState::Idle);
                             }
                         }
                     }
