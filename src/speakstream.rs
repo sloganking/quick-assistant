@@ -420,6 +420,11 @@ pub mod ss {
                                     }
                                 }
 
+                                // Any outstanding conversions are aborted above
+                                // when a push-to-talk kill signal is received,
+                                // so reaching this branch means the conversion
+                                // itself failed. Queue the error audio so it's
+                                // played in sequence with other speech.
                                 ai_audio_playing_tx.send(AudioTask::Error).unwrap();
                                 let _ = thread_state_tx.send(SpeakState::Idle);
                             }
