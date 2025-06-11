@@ -297,6 +297,7 @@ pub mod ss {
         stop_speech_tx: flume::Sender<()>,
         ai_audio_playing_rx: flume::Receiver<AudioTask>,
         speech_speed: Arc<Mutex<f32>>,
+        voice: Arc<Mutex<Voice>>,
         state_tx: flume::Sender<SpeakState>,
         muted: bool,
     }
@@ -310,6 +311,8 @@ pub mod ss {
 
             let speech_speed = Arc::new(Mutex::new(speech_speed));
             let thread_speech_speed = speech_speed.clone();
+            let voice = Arc::new(Mutex::new(voice));
+            let thread_voice_mutex = voice.clone();
 
             // The sentence accumulator sends sentences to this channel to be turned into speech audio
             let (ai_tts_tx, ai_tts_rx): (flume::Sender<String>, flume::Receiver<String>) =
@@ -336,7 +339,7 @@ pub mod ss {
             // that will convert text to speech and pass the audio file path to
             // the ai voice audio playing thread
             let thread_ai_tts_rx = ai_tts_rx.clone();
-            let thread_voice = voice.clone();
+            let thread_voice_mutex2 = thread_voice_mutex.clone();
             let thread_state_tx = state_tx.clone();
             tokio::spawn(async move {
                 // Create the futures ordered queue Used to turn text into speech
@@ -349,7 +352,7 @@ pub mod ss {
                     tokio::spawn(async move {
                         // Queue up any text segments to be turned into speech.
                         while let Ok(ai_text) = thread_ai_tts_rx.recv_async().await {
-                            let thread_voice = thread_voice.clone();
+                            let thread_voice_mutex = thread_voice_mutex2.clone();
                             let thread_ai_text = ai_text.clone();
                             let thread_speech_speed = thread_speech_speed.clone();
                             let state_tx = thread_state_tx_inner.clone();
@@ -357,10 +360,11 @@ pub mod ss {
                                 .send_async(tokio::spawn(async move {
                                     let _ = state_tx.send(SpeakState::Converting);
                                     let speed = *thread_speech_speed.lock().unwrap();
+                                    let voice = thread_voice_mutex.lock().unwrap().clone();
                                     turn_text_to_speech(
                                         thread_ai_text,
                                         speed,
-                                        thread_voice,
+                                        voice,
                                     )
                                 }))
                                 .await
@@ -526,6 +530,7 @@ pub mod ss {
                 stop_speech_tx,
                 ai_audio_playing_rx,
                 speech_speed,
+                voice,
                 state_tx,
                 muted: false,
             }
@@ -584,6 +589,16 @@ pub mod ss {
 
         pub fn get_speech_speed(&self) -> f32 {
             self.speech_speed.lock().map(|s| *s).unwrap_or(1.0)
+        }
+
+        pub fn set_voice(&self, voice: Voice) {
+            if let Ok(mut v) = self.voice.lock() {
+                *v = voice;
+            }
+        }
+
+        pub fn get_voice(&self) -> Voice {
+            self.voice.lock().map(|v| v.clone()).unwrap_or(Voice::Echo)
         }
 
         pub fn mute(&mut self) {
