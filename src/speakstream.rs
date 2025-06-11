@@ -222,10 +222,7 @@ pub mod ss {
         {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
-                println_error(&format!(
-                    "Failed to save ai speech to file: {:?}",
-                    err
-                ));
+                println_error(&format!("Failed to save ai speech to file: {:?}", err));
                 return None;
             }
             Err(err) => {
@@ -507,6 +504,8 @@ pub mod ss {
 
             // stop the AI voice from speaking the current sentence
             self.stop_speech_tx.send(()).unwrap();
+
+            let _ = self.state_tx.send(SpeakState::Idle);
         }
 
         pub fn set_speech_speed(&self, speed: f32) {
