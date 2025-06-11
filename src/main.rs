@@ -832,6 +832,7 @@ async fn web_search(query: &str) -> Result<String, String> {
         .search(query)
         .await
         .map_err(|e| format!("{}", e))?;
+    println!("{}{:?}", "raw web search results: ".purple(), results);
     let summary = results
         .into_iter()
         .take(5)
