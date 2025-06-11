@@ -103,7 +103,7 @@ enum Message {
 }
 
 fn error_and_panic(s: &str) -> ! {
-    error!("A fatal error occured: {}", s);
+    error!("A fatal error occurred: {}", s);
     panic!("{}", s);
 }
 
@@ -1287,7 +1287,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("open_application")
-                                    .description("naively opens an applicatin by pressing the super key to open system search and then types the name of the application and presses enter.")
+                                    .description("naively opens an application by pressing the super key to open system search and then types the name of the application and presses enter.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {
@@ -1595,7 +1595,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             ai_content += content;
 
                                             let mut last_non_empty_line_option = None;
-                                            // return the last non empy line and it's line number
+                                            // return the last non empty line and its line number
                                             for (line_num, line_content) in
                                                 ai_content.lines().enumerate()
                                             {
@@ -1723,7 +1723,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             info!("System ready");
 
-            // Have this main thread recieve events and send them to the key handler thread
+            // Have this main thread receive events and send them to the key handler thread
             {
                 // We send keys as a message in a channel instead of putting the key handler
                 // inside the callback function because the operating system's mouse and
