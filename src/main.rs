@@ -71,6 +71,17 @@ pub enum SubCommands {
     ListDevices,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::web_search;
+
+    #[tokio::test]
+    async fn web_search_returns_results() {
+        let res = web_search("openai").await.expect("search failed");
+        assert!(res.trim().len() > 0, "search results should not be empty");
+    }
+}
+
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum VoiceEnum {
     Alloy,
