@@ -782,7 +782,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed);
+    let (speak_stream, _speak_state_rx) = ss::SpeakStream::new(ai_voice, opt.speech_speed);
     let speak_stream_mutex = Arc::new(Mutex::new(speak_stream));
 
     match opt.subcommands {

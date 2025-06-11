@@ -268,6 +268,12 @@ pub mod ss {
 
     /// SpeakStream is a struct that accumulates tokens into sentences
     /// Once a sentence is complete, it speaks the sentence using the AI voice.
+    pub enum SpeakState {
+        Idle,
+        Converting,
+        Playing,
+    }
+
     pub struct SpeakStream {
         sentence_accumulator: SentenceAccumulator,
         ai_tts_tx: flume::Sender<String>,
@@ -276,10 +282,12 @@ pub mod ss {
         stop_speech_tx: flume::Sender<()>,
         ai_audio_playing_rx: flume::Receiver<AudioTask>,
         speech_speed: Arc<Mutex<f32>>,
+        state_tx: flume::Sender<SpeakState>,
+        state_rx: flume::Receiver<SpeakState>,
     }
 
     impl SpeakStream {
-        pub fn new(voice: Voice, speech_speed: f32) -> Self {
+        pub fn new(voice: Voice, speech_speed: f32) -> (Self, flume::Receiver<SpeakState>) {
             // The maximum number of audio files that can be queued up to be played by the AI voice audio
             // playing thread Limiting this number prevents converting too much text to speech at once and
             // incurring large API costs for conversions that may not be used if speaking is stopped.
@@ -302,6 +310,8 @@ pub mod ss {
                 flume::Receiver<AudioTask>,
             ) = flume::bounded(AI_VOICE_SINK_BUFFER_SIZE);
 
+            let (state_tx, state_rx) = flume::unbounded();
+
             let (futures_ordered_kill_tx, futures_ordered_kill_rx): (
                 flume::Sender<()>,
                 flume::Receiver<()>,
@@ -312,6 +322,7 @@ pub mod ss {
             // the ai voice audio playing thread
             let thread_ai_tts_rx = ai_tts_rx.clone();
             let thread_voice = voice.clone();
+            let thread_state_tx = state_tx.clone();
             tokio::spawn(async move {
                 // Create the futures ordered queue Used to turn text into speech
                 // let (mut converting_tx, mut converting_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -325,8 +336,10 @@ pub mod ss {
                             let thread_voice = thread_voice.clone();
                             let thread_ai_text = ai_text.clone();
                             let thread_speech_speed = thread_speech_speed.clone();
+                            let state_tx = thread_state_tx.clone();
                             converting_tx
                                 .send_async(tokio::spawn(async move {
+                                    let _ = state_tx.send(SpeakState::Converting);
                                     let speed = *thread_speech_speed.lock().unwrap();
                                     turn_text_to_speech(thread_ai_text, speed, thread_voice)
                                 }))
@@ -397,6 +410,7 @@ pub mod ss {
             // Create the ai voice audio playing thread
             // let thread_ai_voice_sink = ai_voice_sink.clone();
             let thread_ai_audio_playing_rx = ai_audio_playing_rx.clone();
+            let thread_state_tx2 = state_tx.clone();
             thread::spawn(move || {
                 let ai_voice_sink = DefaultDeviceSink::new();
                 let ai_voice_sink = Arc::new(ai_voice_sink);
@@ -404,6 +418,7 @@ pub mod ss {
                 for task in thread_ai_audio_playing_rx.iter() {
                     match task {
                         AudioTask::Speech(ai_speech_segment, ai_text) => {
+                            let _ = thread_state_tx2.send(SpeakState::Playing);
                             let file = std::fs::File::open(ai_speech_segment.path()).unwrap();
                             ai_voice_sink.stop();
                             ai_voice_sink
@@ -411,6 +426,7 @@ pub mod ss {
                             info!("Playing AI voice audio: \"{}\"", truncate(&ai_text, 20));
                         }
                         AudioTask::Error => {
+                            let _ = thread_state_tx2.send(SpeakState::Playing);
                             let file = std::fs::File::open(FAILED_TEMP_FILE.path()).unwrap();
                             ai_voice_sink.stop();
                             ai_voice_sink
@@ -426,6 +442,7 @@ pub mod ss {
                     // ai_voice_sink.stop();
                     loop {
                         if ai_voice_sink.empty() {
+                            let _ = thread_state_tx2.send(SpeakState::Idle);
                             break;
                         }
 
@@ -433,6 +450,7 @@ pub mod ss {
                             // empty the stop_speech_rx channel.
                             while stop_speech_rx.try_recv().is_ok() {}
                             ai_voice_sink.stop();
+                            let _ = thread_state_tx2.send(SpeakState::Idle);
                             break;
                         }
 
@@ -441,15 +459,20 @@ pub mod ss {
                 }
             });
 
-            SpeakStream {
-                sentence_accumulator: SentenceAccumulator::new(),
-                ai_tts_tx,
-                ai_tts_rx,
-                futures_ordered_kill_tx,
-                stop_speech_tx,
-                ai_audio_playing_rx,
-                speech_speed,
-            }
+            (
+                SpeakStream {
+                    sentence_accumulator: SentenceAccumulator::new(),
+                    ai_tts_tx,
+                    ai_tts_rx,
+                    futures_ordered_kill_tx,
+                    stop_speech_tx,
+                    ai_audio_playing_rx,
+                    speech_speed,
+                    state_tx,
+                    state_rx: state_rx.clone(),
+                },
+                state_rx,
+            )
         }
 
         pub fn add_token(&mut self, token: &str) {
@@ -494,6 +517,10 @@ pub mod ss {
 
         pub fn get_speech_speed(&self) -> f32 {
             self.speech_speed.lock().map(|s| *s).unwrap_or(1.0)
+        }
+
+        pub fn state_rx(&self) -> flume::Receiver<SpeakState> {
+            self.state_rx.clone()
         }
     }
 }
