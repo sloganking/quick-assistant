@@ -10,7 +10,6 @@ pub mod ss {
 
     use crate::default_device_sink::DefaultDeviceSink;
     use crate::FAILED_TEMP_FILE;
-    use crate::PLAY_AUDIO;
     use std::fs::File;
     use std::io::{BufReader, Write};
     use std::path::Path;
@@ -214,7 +213,6 @@ pub mod ss {
                         "Failed to turn text to speech due to timeout: {:?}",
                         err
                     ));
-                    PLAY_AUDIO(FAILED_TEMP_FILE.path());
                     return None;
                 }
             };
@@ -223,7 +221,6 @@ pub mod ss {
             Ok(res) => res,
             Err(err) => {
                 println_error(&format!("Failed to turn text to speech: {:?}", err));
-                PLAY_AUDIO(FAILED_TEMP_FILE.path());
                 return None;
             }
         };
@@ -244,7 +241,6 @@ pub mod ss {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
                 println_error(&format!("Failed to save ai speech to file: {:?}", err));
-                PLAY_AUDIO(FAILED_TEMP_FILE.path());
                 return None;
             }
             Err(err) => {
@@ -252,7 +248,6 @@ pub mod ss {
                     "Failed to save ai speech to file due to timeout: {:?}",
                     err
                 ));
-                PLAY_AUDIO(FAILED_TEMP_FILE.path());
                 return None;
             }
         }
@@ -419,17 +414,13 @@ pub mod ss {
                             }
                             None => {
                                 println_error("failed to turn text to speech");
-                                let mut kill_signal_sent = false;
                                 for _ in futures_ordered_kill_rx.try_iter() {
                                     while let Ok(handle) = converting_rx.try_recv() {
                                         handle.abort();
                                     }
-                                    kill_signal_sent = true;
                                 }
 
-                                if !kill_signal_sent {
-                                    ai_audio_playing_tx.send(AudioTask::Error).unwrap();
-                                }
+                                ai_audio_playing_tx.send(AudioTask::Error).unwrap();
                                 let _ = thread_state_tx.send(SpeakState::Idle);
                             }
                         }
