@@ -59,6 +59,7 @@ mod options;
 mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use duckduckgo_search::DuckDuckGoSearch;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -376,6 +377,18 @@ fn call_fn(
                 }
             });
             None
+        }
+
+        "search_web" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            let query = args["query"].as_str().unwrap_or("");
+            match tokio::runtime::Runtime::new() {
+                Ok(rt) => match rt.block_on(web_search(query)) {
+                    Ok(results) => Some(results),
+                    Err(err) => Some(format!("Web search failed: {}", err)),
+                },
+                Err(err) => Some(format!("Failed to create runtime: {}", err)),
+            }
         }
 
         "get_location" => match tokio::runtime::Runtime::new() {
@@ -807,6 +820,21 @@ fn speedtest() -> Result<String, String> {
     };
 
     Ok(output)
+}
+
+async fn web_search(query: &str) -> Result<String, String> {
+    let searcher = DuckDuckGoSearch::new();
+    let results = searcher
+        .search(query)
+        .await
+        .map_err(|e| format!("{}", e))?;
+    let summary = results
+        .into_iter()
+        .take(5)
+        .map(|(title, url)| format!("{} - {}", title, url))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(summary)
 }
 
 async fn get_location() -> Result<String, String> {
@@ -1391,6 +1419,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("search_web")
+                                    .description("Performs a web search and returns the top results.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {"query": {"type": "string"}},
+                                        "required": ["query"],
                                     }))
                                     .build().unwrap(),
 
