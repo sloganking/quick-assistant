@@ -29,6 +29,10 @@ pub struct Opt {
     #[arg(long, default_value_t = 1.0)]
     pub speech_speed: f32,
 
+    /// Play a ticking sound while the AI is converting text to speech.
+    #[arg(long)]
+    pub tick: bool,
+
     /// The voice that the AI will use to speak.
     /// Choose from a list of available voices to customize the output.
     #[arg(long)]
