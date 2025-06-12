@@ -58,6 +58,7 @@ mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use duckduckgo_search::DuckDuckGoSearch;
+use urlencoding::encode;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -75,7 +76,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_search_returns_results() {
-        let res = web_search("openai").await.expect("search failed");
+        let res = web_search("open ai").await.expect("search failed");
         assert!(res.trim().len() > 0, "search results should not be empty");
     }
 }
@@ -846,7 +847,8 @@ async fn web_search(query: &str) -> Result<String, String> {
     }
     println!("{}{}", "search query: ".purple(), query);
     let ddg = DuckDuckGoSearch::new();
-    match ddg.search(query).await {
+    let encoded_query = encode(query);
+    match ddg.search(&encoded_query).await {
         Ok(results) => {
             println!("{}{:?}", "raw web search results: ".purple(), results);
             if results.is_empty() {
