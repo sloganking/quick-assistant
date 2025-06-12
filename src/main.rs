@@ -57,7 +57,7 @@ mod options;
 mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use urlencoding::encode;
+use duckduckgo_search::DuckDuckGoSearch;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -845,80 +845,22 @@ async fn web_search(query: &str) -> Result<String, String> {
         return Err("empty query".into());
     }
     println!("{}{}", "search query: ".purple(), query);
-    let client = reqwest::Client::builder()
-        .user_agent("quick-assistant/1.0")
-        .build()
-        .map_err(|e| format!("client build failed: {}", e))?;
-
-    let url = format!(
-        "https://api.duckduckgo.com/?q={}&format=json&no_redirect=1&no_html=1&kp=-2",
-        encode(query)
-    );
-    println!("{}{}", "search url: ".purple(), url);
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {}", e))?;
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("request failed: {}", e))?;
-    let data: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("parse failed: {}", e))?;
-
-    fn collect(entry: &serde_json::Value, results: &mut Vec<String>) {
-        if let Some(arr) = entry.get("Topics").and_then(|t| t.as_array()) {
-            for sub in arr {
-                collect(sub, results);
-                if results.len() >= 5 {
-                    break;
-                }
-            }
-            return;
-        }
-
-        if let (Some(text), Some(url)) = (
-            entry.get("Text").and_then(|t| t.as_str()),
-            entry.get("FirstURL").and_then(|u| u.as_str()),
-        ) {
-            results.push(format!("{} - {}", text, url));
-        }
-    }
-
-    let mut results = Vec::new();
-
-    if let Some(arr) = data.get("Results").and_then(|v| v.as_array()) {
-        for entry in arr {
-            collect(entry, &mut results);
-            if results.len() >= 5 {
-                break;
+    let ddg = DuckDuckGoSearch::new();
+    match ddg.search(query).await {
+        Ok(results) => {
+            println!("{}{:?}", "raw web search results: ".purple(), results);
+            if results.is_empty() {
+                Err("no results".into())
+            } else {
+                Ok(results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (title, url))| format!("{}. {} - {}", i + 1, title, url))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
             }
         }
-    }
-
-    if results.len() < 5 {
-        if let Some(arr) = data.get("RelatedTopics").and_then(|v| v.as_array()) {
-            for entry in arr {
-                collect(entry, &mut results);
-                if results.len() >= 5 {
-                    break;
-                }
-            }
-        }
-    }
-
-    if results.is_empty() {
-        println!("{}{}", "raw web search response: ".purple(), text);
-        Err("no results".into())
-    } else {
-        println!("{}{:?}", "raw web search results: ".purple(), results);
-        Ok(results
-            .iter()
-            .enumerate()
-            .map(|(i, r)| format!("{}. {}", i + 1, r))
-            .collect::<Vec<_>>()
-            .join("\n"))
+        Err(err) => Err(format!("duckduckgo search failed: {}", err)),
     }
 }
 
