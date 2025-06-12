@@ -59,7 +59,7 @@ mod options;
 mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-use duckduckgo_search::DuckDuckGoSearch;
+use urlencoding::encode;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -838,19 +838,35 @@ fn speedtest() -> Result<String, String> {
 }
 
 async fn web_search(query: &str) -> Result<String, String> {
-    let searcher = DuckDuckGoSearch::new();
-    let results = searcher
-        .search(query)
+    let url = format!(
+        "https://api.duckduckgo.com/?q={}&format=json&no_redirect=1&kp=-2",
+        encode(query)
+    );
+    let resp = reqwest::get(&url)
         .await
-        .map_err(|e| format!("{}", e))?;
+        .map_err(|e| format!("request failed: {}", e))?;
+    let data: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse failed: {}", e))?;
+    let topics = data["RelatedTopics"].as_array().ok_or("no results")?;
+    let mut results = Vec::new();
+    for (i, topic) in topics.iter().enumerate() {
+        if let (Some(text), Some(url)) = (topic.get("Text"), topic.get("FirstURL")) {
+            if let (Some(text), Some(url)) = (text.as_str(), url.as_str()) {
+                results.push(format!("{}. {} - {}", i + 1, text, url));
+                if results.len() >= 5 {
+                    break;
+                }
+            }
+        }
+    }
     println!("{}{:?}", "raw web search results: ".purple(), results);
-    let summary = results
-        .into_iter()
-        .take(5)
-        .map(|(title, url)| format!("{} - {}", title, url))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Ok(summary)
+    if results.is_empty() {
+        Err("no results".into())
+    } else {
+        Ok(results.join("\n"))
+    }
 }
 
 async fn get_location() -> Result<String, String> {
