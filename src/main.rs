@@ -58,7 +58,6 @@ mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use duckduckgo_search::DuckDuckGoSearch;
-use urlencoding::encode;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -405,6 +404,18 @@ fn call_fn(
                         Some(results)
                     }
                     Err(err) => Some(format!("Web search failed: {}", err)),
+                },
+                Err(err) => Some(format!("Failed to create runtime: {}", err)),
+            }
+        }
+
+        "open_url" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            let url = args["url"].as_str().unwrap_or("");
+            match tokio::runtime::Runtime::new() {
+                Ok(rt) => match rt.block_on(open_url(url)) {
+                    Ok(content) => Some(content),
+                    Err(err) => Some(format!("Failed to open url: {}", err)),
                 },
                 Err(err) => Some(format!("Failed to create runtime: {}", err)),
             }
@@ -847,8 +858,7 @@ async fn web_search(query: &str) -> Result<String, String> {
     }
     println!("{}{}", "search query: ".purple(), query);
     let ddg = DuckDuckGoSearch::new();
-    let encoded_query = encode(query);
-    match ddg.search(&encoded_query).await {
+    match ddg.search(query).await {
         Ok(results) => {
             println!("{}{:?}", "raw web search results: ".purple(), results);
             if results.is_empty() {
@@ -894,6 +904,30 @@ async fn get_location() -> Result<String, String> {
         "{}, {}, {} ({}, {})",
         city, region, country, lat, lon
     ))
+}
+
+async fn open_url(url: &str) -> Result<String, String> {
+    if url.trim().is_empty() {
+        return Err("empty url".into());
+    }
+
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Request failed with status: {}", resp.status()));
+    }
+
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    let text = html2text::from_read(html.as_bytes(), 80)
+        .map_err(|e| format!("Failed to parse html: {}", e))?;
+
+    Ok(text.chars().take(2000).collect())
 }
 
 fn get_currently_active_log_file() -> Option<PathBuf> {
@@ -1458,6 +1492,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {"query": {"type": "string"}},
                                         "required": ["query"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("open_url")
+                                    .description("Fetches a web page and returns plain text content.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {"url": {"type": "string"}},
+                                        "required": ["url"],
                                     }))
                                     .build().unwrap(),
 
