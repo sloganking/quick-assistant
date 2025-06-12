@@ -838,42 +838,60 @@ fn speedtest() -> Result<String, String> {
 }
 
 async fn web_search(query: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("quick-assistant/1.0")
+        .build()
+        .map_err(|e| format!("client build failed: {}", e))?;
+
     let url = format!(
-        "https://api.duckduckgo.com/?q={}&format=json&no_redirect=1&kp=-2",
+        "https://api.duckduckgo.com/?q={}&format=json&no_redirect=1&no_html=1&kp=-2",
         encode(query)
     );
-    let resp = reqwest::get(&url)
+    let resp = client
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
     let text = resp.text().await.map_err(|e| format!("request failed: {}", e))?;
     let data: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("parse failed: {}", e))?;
 
+    fn collect(entry: &serde_json::Value, results: &mut Vec<String>) {
+        if let Some(arr) = entry.get("Topics").and_then(|t| t.as_array()) {
+            for sub in arr {
+                collect(sub, results);
+                if results.len() >= 5 {
+                    break;
+                }
+            }
+            return;
+        }
+
+        if let (Some(text), Some(url)) = (
+            entry.get("Text").and_then(|t| t.as_str()),
+            entry.get("FirstURL").and_then(|u| u.as_str()),
+        ) {
+            results.push(format!("{} - {}", text, url));
+        }
+    }
+
     let mut results = Vec::new();
 
-    if let Some(arr) = data["Results"].as_array() {
-        for (i, topic) in arr.iter().enumerate() {
-            if let (Some(text), Some(url)) = (topic.get("Text"), topic.get("FirstURL")) {
-                if let (Some(text), Some(url)) = (text.as_str(), url.as_str()) {
-                    results.push(format!("{}. {} - {}", i + 1, text, url));
-                    if results.len() >= 5 {
-                        break;
-                    }
-                }
+    if let Some(arr) = data.get("Results").and_then(|v| v.as_array()) {
+        for entry in arr {
+            collect(entry, &mut results);
+            if results.len() >= 5 {
+                break;
             }
         }
     }
 
     if results.len() < 5 {
-        if let Some(topics) = data["RelatedTopics"].as_array() {
-            for (i, topic) in topics.iter().enumerate() {
-                if let (Some(text), Some(url)) = (topic.get("Text"), topic.get("FirstURL")) {
-                    if let (Some(text), Some(url)) = (text.as_str(), url.as_str()) {
-                        results.push(format!("{}. {} - {}", results.len() + 1, text, url));
-                        if results.len() >= 5 {
-                            break;
-                        }
-                    }
+        if let Some(arr) = data.get("RelatedTopics").and_then(|v| v.as_array()) {
+            for entry in arr {
+                collect(entry, &mut results);
+                if results.len() >= 5 {
+                    break;
                 }
             }
         }
@@ -884,7 +902,14 @@ async fn web_search(query: &str) -> Result<String, String> {
         Err("no results".into())
     } else {
         println!("{}{:?}", "raw web search results: ".purple(), results);
-        Ok(results.join("\n"))
+        Ok(
+            results
+                .iter()
+                .enumerate()
+                .map(|(i, r)| format!("{}. {}", i + 1, r))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
     }
 }
 
