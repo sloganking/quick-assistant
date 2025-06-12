@@ -27,9 +27,7 @@ use tempfile::Builder;
 mod record;
 use crate::default_device_sink::{
     default_device_name as get_default_output_device,
-    list_output_devices as list_audio_output_devices,
-    set_output_device,
-    DefaultDeviceSink,
+    list_output_devices as list_audio_output_devices, set_output_device, DefaultDeviceSink,
 };
 use async_openai::{
     types::{
@@ -59,6 +57,8 @@ mod options;
 mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use duckduckgo_search::DuckDuckGoSearch;
+use urlencoding::encode;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -68,6 +68,17 @@ pub enum SubCommands {
     ShowKeyPresses,
     /// Lists the audio input devices on your system.
     ListDevices,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_search;
+
+    #[tokio::test]
+    async fn web_search_returns_results() {
+        let res = web_search("open ai").await.expect("search failed");
+        assert!(res.trim().len() > 0, "search results should not be empty");
+    }
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -182,8 +193,13 @@ fn call_fn(
 ) -> Option<String> {
     let mut enigo = Enigo::new();
 
-    println!("{}{}", "Invoking function: ".purple(), fn_name);
-    info!("AI Invoked function: {}", fn_name);
+    println!(
+        "{}{} with args: {}",
+        "Invoking function: ".purple(),
+        fn_name,
+        fn_args
+    );
+    info!("AI Invoked function: {} with args {}", fn_name, fn_args);
 
     match fn_name {
         "set_screen_brightness" => {
@@ -376,6 +392,22 @@ fn call_fn(
                 }
             });
             None
+        }
+
+        "search_web" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            let query = args["query"].as_str().unwrap_or("");
+            match tokio::runtime::Runtime::new() {
+                Ok(rt) => match rt.block_on(web_search(query)) {
+                    Ok(results) => {
+                        println!("{}{}", "web search results: ".purple(), results);
+                        info!("Web search results: {}", results);
+                        Some(results)
+                    }
+                    Err(err) => Some(format!("Web search failed: {}", err)),
+                },
+                Err(err) => Some(format!("Failed to create runtime: {}", err)),
+            }
         }
 
         "get_location" => match tokio::runtime::Runtime::new() {
@@ -807,6 +839,31 @@ fn speedtest() -> Result<String, String> {
     };
 
     Ok(output)
+}
+
+async fn web_search(query: &str) -> Result<String, String> {
+    if query.trim().is_empty() {
+        return Err("empty query".into());
+    }
+    println!("{}{}", "search query: ".purple(), query);
+    let ddg = DuckDuckGoSearch::new();
+    let encoded_query = encode(query);
+    match ddg.search(&encoded_query).await {
+        Ok(results) => {
+            println!("{}{:?}", "raw web search results: ".purple(), results);
+            if results.is_empty() {
+                Err("no results".into())
+            } else {
+                Ok(results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (title, url))| format!("{}. {} - {}", i + 1, title, url))
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+        }
+        Err(err) => Err(format!("duckduckgo search failed: {}", err)),
+    }
 }
 
 async fn get_location() -> Result<String, String> {
@@ -1395,6 +1452,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     .build().unwrap(),
 
                                 ChatCompletionFunctionsArgs::default()
+                                    .name("search_web")
+                                    .description("Performs a web search and returns the top results.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {"query": {"type": "string"}},
+                                        "required": ["query"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
                                     .name("set_timer_at")
                                     .description("Sets a timer to go off at a specific time. Pass the time as rfc3339 datetime string. Example: \"2024-12-04T00:44:00-08:00\". The description field is optional, add descriptions that will tell you what to remind the user to do, if anything, after the timer goes off.")
                                     .parameters(json!({
@@ -1510,7 +1577,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": [],
                                     }))
                                     .build().unwrap(),
-                              
+
                               ChatCompletionFunctionsArgs::default()
                                     .name("get_location")
                                     .description("Returns an approximate location based on the machine's IP address.")
