@@ -845,26 +845,45 @@ async fn web_search(query: &str) -> Result<String, String> {
     let resp = reqwest::get(&url)
         .await
         .map_err(|e| format!("request failed: {}", e))?;
-    let data: serde_json::Value = resp
-        .json()
-        .await
+    let text = resp.text().await.map_err(|e| format!("request failed: {}", e))?;
+    let data: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("parse failed: {}", e))?;
-    let topics = data["RelatedTopics"].as_array().ok_or("no results")?;
+
     let mut results = Vec::new();
-    for (i, topic) in topics.iter().enumerate() {
-        if let (Some(text), Some(url)) = (topic.get("Text"), topic.get("FirstURL")) {
-            if let (Some(text), Some(url)) = (text.as_str(), url.as_str()) {
-                results.push(format!("{}. {} - {}", i + 1, text, url));
-                if results.len() >= 5 {
-                    break;
+
+    if let Some(arr) = data["Results"].as_array() {
+        for (i, topic) in arr.iter().enumerate() {
+            if let (Some(text), Some(url)) = (topic.get("Text"), topic.get("FirstURL")) {
+                if let (Some(text), Some(url)) = (text.as_str(), url.as_str()) {
+                    results.push(format!("{}. {} - {}", i + 1, text, url));
+                    if results.len() >= 5 {
+                        break;
+                    }
                 }
             }
         }
     }
-    println!("{}{:?}", "raw web search results: ".purple(), results);
+
+    if results.len() < 5 {
+        if let Some(topics) = data["RelatedTopics"].as_array() {
+            for (i, topic) in topics.iter().enumerate() {
+                if let (Some(text), Some(url)) = (topic.get("Text"), topic.get("FirstURL")) {
+                    if let (Some(text), Some(url)) = (text.as_str(), url.as_str()) {
+                        results.push(format!("{}. {} - {}", results.len() + 1, text, url));
+                        if results.len() >= 5 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if results.is_empty() {
+        println!("{}{}", "raw web search response: ".purple(), text);
         Err("no results".into())
     } else {
+        println!("{}{:?}", "raw web search results: ".purple(), results);
         Ok(results.join("\n"))
     }
 }
