@@ -27,9 +27,7 @@ use tempfile::Builder;
 mod record;
 use crate::default_device_sink::{
     default_device_name as get_default_output_device,
-    list_output_devices as list_audio_output_devices,
-    set_output_device,
-    DefaultDeviceSink,
+    list_output_devices as list_audio_output_devices, set_output_device, DefaultDeviceSink,
 };
 use async_openai::{
     types::{
@@ -194,8 +192,13 @@ fn call_fn(
 ) -> Option<String> {
     let mut enigo = Enigo::new();
 
-    println!("{}{}", "Invoking function: ".purple(), fn_name);
-    info!("AI Invoked function: {}", fn_name);
+    println!(
+        "{}{} with args: {}",
+        "Invoking function: ".purple(),
+        fn_name,
+        fn_args
+    );
+    info!("AI Invoked function: {} with args {}", fn_name, fn_args);
 
     match fn_name {
         "set_screen_brightness" => {
@@ -838,6 +841,10 @@ fn speedtest() -> Result<String, String> {
 }
 
 async fn web_search(query: &str) -> Result<String, String> {
+    if query.trim().is_empty() {
+        return Err("empty query".into());
+    }
+    println!("{}{}", "search query: ".purple(), query);
     let client = reqwest::Client::builder()
         .user_agent("quick-assistant/1.0")
         .build()
@@ -847,14 +854,18 @@ async fn web_search(query: &str) -> Result<String, String> {
         "https://api.duckduckgo.com/?q={}&format=json&no_redirect=1&no_html=1&kp=-2",
         encode(query)
     );
+    println!("{}{}", "search url: ".purple(), url);
     let resp = client
         .get(&url)
         .send()
         .await
         .map_err(|e| format!("request failed: {}", e))?;
-    let text = resp.text().await.map_err(|e| format!("request failed: {}", e))?;
-    let data: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("parse failed: {}", e))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("request failed: {}", e))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("parse failed: {}", e))?;
 
     fn collect(entry: &serde_json::Value, results: &mut Vec<String>) {
         if let Some(arr) = entry.get("Topics").and_then(|t| t.as_array()) {
@@ -902,14 +913,12 @@ async fn web_search(query: &str) -> Result<String, String> {
         Err("no results".into())
     } else {
         println!("{}{:?}", "raw web search results: ".purple(), results);
-        Ok(
-            results
-                .iter()
-                .enumerate()
-                .map(|(i, r)| format!("{}. {}", i + 1, r))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
+        Ok(results
+            .iter()
+            .enumerate()
+            .map(|(i, r)| format!("{}. {}", i + 1, r))
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 }
 
@@ -1624,7 +1633,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": [],
                                     }))
                                     .build().unwrap(),
-                              
+
                               ChatCompletionFunctionsArgs::default()
                                     .name("get_location")
                                     .description("Returns an approximate location based on the machine's IP address.")
