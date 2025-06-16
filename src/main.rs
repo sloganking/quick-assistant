@@ -59,6 +59,9 @@ mod options;
 mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use scraper::{Html, Selector};
+use url::Url;
+use urlencoding::decode;
 
 use crate::speakstream::ss::SpeakStream;
 
@@ -377,6 +380,18 @@ fn call_fn(
             });
             None
         }
+
+        "web_search" => match tokio::runtime::Runtime::new() {
+            Ok(rt) => {
+                let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+                let query = args["query"].as_str().unwrap();
+                match rt.block_on(web_search(query)) {
+                    Ok(results) => Some(results),
+                    Err(err) => Some(format!("Search failed: {}", err)),
+                }
+            }
+            Err(err) => Some(format!("Failed to create runtime: {}", err)),
+        },
 
         "get_location" => match tokio::runtime::Runtime::new() {
             Ok(rt) => match rt.block_on(get_location()) {
@@ -837,6 +852,48 @@ async fn get_location() -> Result<String, String> {
         "{}, {}, {} ({}, {})",
         city, region, country, lat, lon
     ))
+}
+
+async fn web_search(query: &str) -> Result<String, String> {
+    let url = format!(
+        "https://duckduckgo.com/html/?q={}",
+        urlencoding::encode(query)
+    );
+
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read body: {}", e))?;
+
+    let document = Html::parse_document(&body);
+    let selector = Selector::parse("a.result__a").unwrap();
+    let mut results = Vec::new();
+
+    for element in document.select(&selector).take(5) {
+        let title = element.text().collect::<Vec<_>>().join("").trim().to_string();
+        if let Some(href) = element.value().attr("href") {
+            let url_full = format!("https:{}", href);
+            if let Ok(parsed) = Url::parse(&url_full) {
+                if let Some((_, uddg)) = parsed.query_pairs().find(|(k, _)| k == "uddg") {
+                    let uddg_owned = uddg.into_owned();
+                    let decoded = decode(&uddg_owned)
+                        .unwrap_or_else(|_| uddg_owned.clone().into())
+                        .into_owned();
+                    results.push(format!("{} - {}", title, decoded));
+                }
+            }
+        }
+    }
+
+    if results.is_empty() {
+        Err("No results found".to_string())
+    } else {
+        Ok(results.join("\n"))
+    }
 }
 
 fn get_currently_active_log_file() -> Option<PathBuf> {
@@ -1391,6 +1448,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("web_search")
+                                    .description("Performs a web search and returns the top results.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "query": { "type": "string" } },
+                                        "required": ["query"],
                                     }))
                                     .build().unwrap(),
 
