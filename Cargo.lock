@@ -4069,6 +4069,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "speakstream",
  "sysinfo",
  "tempfile",
  "tokio",
