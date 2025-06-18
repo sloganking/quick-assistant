@@ -157,6 +157,26 @@ fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
     temp_file
 }
 
+/// Compile-time helper that needs the path only once.
+#[macro_export]
+macro_rules! temp_asset {
+    ($path:literal) => {{
+        // 1. Embed bytes at compile time
+        const BYTES: &[u8] = include_bytes!($path); // :contentReference[oaicite:6]{index=6}
+                                                    // 2. Derive the ".ext" suffix at run time
+        let ext = std::path::Path::new($path)
+            .extension()
+            .map(|e| {
+                let mut s = String::from(".");
+                s.push_str(&e.to_string_lossy());
+                s
+            })
+            .unwrap_or_default();
+        // 3. Build the temp file
+        create_temp_file_from_bytes(BYTES, &ext)
+    }};
+}
+
 fn set_screen_brightness(brightness: u32) -> Option<()> {
     if brightness > 100 {
         println!("Brightness must be between 0 and 100");
@@ -287,7 +307,8 @@ fn call_fn(
             Ok(_) => None,
             Err(e) => Some(format!("Failed to open OpenAI billing page: {}", e)),
         },
-        "open_assistance_repo" => match open::that("https://github.com/sloganking/quick-assistant") {
+        "open_assistance_repo" => match open::that("https://github.com/sloganking/quick-assistant")
+        {
             Ok(_) => None,
             Err(e) => Some(format!("Failed to open AI Assistance repository: {}", e)),
         },
@@ -879,7 +900,7 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
 }
 
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
-    LazyLock::new(|| create_temp_file_from_bytes(include_bytes!("../assets/failed.mp3"), ".mp3"));
+    LazyLock::new(|| temp_asset!("../assets/failed.mp3"));
 
 /// A global, lazily-initialized closure for sending paths into a channel.
 static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(|| {
@@ -1005,10 +1026,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let llm_should_stop_mutex = Arc::new(Mutex::new(false));
 
-            let alarm_temp_file = create_temp_file_from_bytes(
-                include_bytes!("../assets/Dreaming of Victory.mp3"),
-                ".mp3",
-            );
+            let alarm_temp_file = temp_asset!("../assets/Dreaming of Victory.mp3");
             let (audible_timers, expired_timers_rx) =
                 AudibleTimers::new(alarm_temp_file.path().to_path_buf())
                     .expect("Failed to create audible_timers");
