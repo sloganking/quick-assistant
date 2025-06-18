@@ -27,9 +27,7 @@ use tempfile::Builder;
 mod record;
 use crate::default_device_sink::{
     default_device_name as get_default_output_device,
-    list_output_devices as list_audio_output_devices,
-    set_output_device,
-    DefaultDeviceSink,
+    list_output_devices as list_audio_output_devices, set_output_device, DefaultDeviceSink,
 };
 use async_openai::{
     types::{
@@ -286,6 +284,10 @@ fn call_fn(
                 Err(e) => Some(String::from("Showing logs folder failed with: ") + &e.to_string()), // If unwrap fails, return Some with the error message
             }
         }
+        "open_openai_billing" => match open::that("https://platform.openai.com/usage?tab=month") {
+            Ok(_) => None,
+            Err(e) => Some(format!("Failed to open OpenAI billing page: {}", e)),
+        },
         "sysinfo" => Some(get_system_info()),
 
         "get_system_processes" => Some(get_system_processes()),
@@ -1353,6 +1355,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     .build().unwrap(),
 
                                 ChatCompletionFunctionsArgs::default()
+                                    .name("open_openai_billing")
+                                    .description("Opens the OpenAI usage dashboard for this month in the default web browser.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
                                     .name("sysinfo")
                                     .description("Returns this system's information.")
                                     .parameters(json!({
@@ -1510,7 +1522,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "required": [],
                                     }))
                                     .build().unwrap(),
-                              
+
                               ChatCompletionFunctionsArgs::default()
                                     .name("get_location")
                                     .description("Returns an approximate location based on the machine's IP address.")
