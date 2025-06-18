@@ -30,6 +30,7 @@ https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5
 - ⏱️ **Timers** with alarm sounds
 - 🎙️ **Change voice** or speaking speed on the fly
 - 🔕 **Mute/unmute** the voice output
+- 💸 **Open OpenAI billing** page in the browser
 
 ## Setup
 
