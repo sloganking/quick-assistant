@@ -50,7 +50,6 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use uuid::Uuid;
 mod easy_rdev_key;
-mod speakstream;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss;
 use timers::AudibleTimers;
@@ -60,7 +59,7 @@ mod windows_volume;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
-use crate::speakstream::ss::SpeakStream;
+use speakstream::ss::SpeakStream;
 
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {
