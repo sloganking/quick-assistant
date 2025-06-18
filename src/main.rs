@@ -284,7 +284,7 @@ fn call_fn(
                 Err(e) => Some(String::from("Showing logs folder failed with: ") + &e.to_string()), // If unwrap fails, return Some with the error message
             }
         }
-        "open_openai_billing" => match open::that("https://platform.openai.com/usage?tab=month") {
+        "open_openai_billing" => match open::that("https://platform.openai.com/usage") {
             Ok(_) => None,
             Err(e) => Some(format!("Failed to open OpenAI billing page: {}", e)),
         },
@@ -1356,7 +1356,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("open_openai_billing")
-                                    .description("Opens the OpenAI usage dashboard for this month in the default web browser.")
+                                    .description("Opens the OpenAI usage dashboard in the default web browser.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
