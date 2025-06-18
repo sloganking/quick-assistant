@@ -26,6 +26,7 @@ https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5
 - 🖥️ **Get system info** on demand
 - 🗑️ **List and kill processes** by voice
 - 🌐 **Run internet speed tests**
+- 🔍 **Search the web** for information
 - 📋 **Set the clipboard** contents
 - ⏱️ **Timers** with alarm sounds
 - 🎙️ **Change voice** or speaking speed on the fly
