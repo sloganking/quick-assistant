@@ -287,6 +287,10 @@ fn call_fn(
             Ok(_) => None,
             Err(e) => Some(format!("Failed to open OpenAI billing page: {}", e)),
         },
+        "open_assistance_repo" => match open::that("https://github.com/sloganking/quick-assistant") {
+            Ok(_) => None,
+            Err(e) => Some(format!("Failed to open AI Assistance repository: {}", e)),
+        },
         "sysinfo" => Some(get_system_info()),
 
         "get_system_processes" => Some(get_system_processes()),
@@ -1356,6 +1360,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("open_openai_billing")
                                     .description("Opens the OpenAI usage dashboard in the default web browser.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("open_assistance_repo")
+                                    .description("Opens the AI Assistance repository in the default web browser.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
