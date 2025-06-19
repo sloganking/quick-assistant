@@ -1,5 +1,11 @@
 ## Use gitmoji for every git commit.
 
+## AI testing responsibilities
+
+- The AI is responsible for all tests.
+- Add, remove, or modify tests as needed when making code changes.
+- Always run the full test suite after updates.
+
 ### Specification
 
 You can extend Gitmoji and make it your own, but in case you want to follow the official specification, please continue reading 👀
