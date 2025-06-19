@@ -20,6 +20,7 @@ use tracing_subscriber::Registry;
 mod default_device_sink;
 mod timers;
 mod transcribe;
+mod web_search;
 use chrono::{DateTime, Local};
 use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
@@ -433,6 +434,18 @@ fn call_fn(
             },
             Err(err) => Some(format!("Failed to create runtime: {}", err)),
         },
+
+        "web_search" => {
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            let query = args["query"].as_str().unwrap_or("");
+            match tokio::runtime::Runtime::new() {
+                Ok(rt) => match rt.block_on(web_search::web_search(query)) {
+                    Ok(answer) => Some(answer),
+                    Err(err) => Some(format!("Web search failed: {}", err)),
+                },
+                Err(err) => Some(format!("Failed to create runtime: {}", err)),
+            }
+        }
 
         "set_timer_at" => {
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
@@ -1457,6 +1470,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("web_search")
+                                    .description("Searches the web using the OpenAI Agents API and returns the answer.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "query": { "type": "string" } },
+                                        "required": ["query"],
                                     }))
                                     .build().unwrap(),
 
