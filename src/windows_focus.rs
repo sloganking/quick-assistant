@@ -8,6 +8,13 @@ use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, S
 #[cfg(target_os = "windows")]
 /// Brings the console window to the foreground on Windows.
 pub fn bring_terminal_to_front() {
+    // Skip if running inside VS Code's integrated terminal to avoid spawning a new window
+    if let Ok(term) = std::env::var("TERM_PROGRAM") {
+        if term.to_lowercase().contains("vscode") {
+            return;
+        }
+    }
+
     unsafe {
         let hwnd: HWND = GetConsoleWindow();
         if hwnd.0 != 0 {
@@ -27,10 +34,9 @@ pub fn bring_terminal_to_front() {}
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "windows")]
     #[test]
     fn call_bring_terminal_to_front() {
-        // The function should simply run without panicking.
+        // The function should simply run without panicking on all platforms.
         bring_terminal_to_front();
     }
 }
