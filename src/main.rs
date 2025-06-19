@@ -668,8 +668,9 @@ fn set_up_logging(logs_dir: &Path) -> WorkerGuard {
     } else {
         // Define a custom filter function
         let custom_filter = FilterFn::new(|metadata| {
-            // Allow logs from 'quick_assistant' at DEBUG level and above
-            metadata.target().starts_with("quick_assistant")
+            // Allow logs from this crate and from `speakstream` at DEBUG level and above
+            (metadata.target().starts_with("quick_assistant")
+                || metadata.target().starts_with("speakstream"))
                 && metadata.level() <= &tracing::Level::DEBUG
         });
         use tracing_subscriber::prelude::*;
