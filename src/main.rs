@@ -54,6 +54,8 @@ use timers::AudibleTimers;
 mod options;
 #[cfg(target_os = "windows")]
 mod windows_volume;
+#[cfg(target_os = "windows")]
+mod windows_focus;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
@@ -609,6 +611,18 @@ fn call_fn(
             let speak_stream = speak_stream_mutex.lock().unwrap();
             let name = voice_to_str(&speak_stream.get_voice());
             Some(format!("Current voice is {}", name))
+        }
+
+        "focus_terminal" => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_focus::bring_terminal_to_front();
+                None
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Some("focus_terminal is only supported on Windows".to_string())
+            }
         }
 
         "list_output_devices" => {
@@ -1570,6 +1584,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ChatCompletionFunctionsArgs::default()
                                     .name("get_voice")
                                     .description("Returns the name of the current AI voice.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("focus_terminal")
+                                    .description("Brings the console window to the foreground on Windows.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
