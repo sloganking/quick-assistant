@@ -142,6 +142,28 @@ fn println_error(err: &str) {
     warn!("{}", err);
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_long_string() {
+        assert_eq!(truncate("hello world", 5), "hello...");
+    }
+
+    #[test]
+    fn parse_voice_and_voice_to_str_roundtrip() {
+        let voice = parse_voice("Alloy").expect("voice should parse");
+        assert_eq!(voice_to_str(&voice), "alloy");
+        assert!(parse_voice("doesnotexist").is_none());
+    }
+}
+
 /// Creates a temporary file from a byte slice and returns the path to the file.
 fn create_temp_file_from_bytes(bytes: &[u8], extension: &str) -> NamedTempFile {
     let temp_file = Builder::new()

@@ -227,3 +227,31 @@ impl AudibleTimers {
         self.audio_stop_tx.send(()).unwrap();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use chrono::{Local, Duration};
+    use std::env;
+
+    #[test]
+    fn set_get_delete_timer() {
+        let tmp = tempdir().unwrap();
+        env::set_var("XDG_CACHE_HOME", tmp.path());
+        std::fs::create_dir_all(tmp.path().join("quick-assistant")).unwrap();
+
+        // Ensure no timers initially
+        assert!(get_timers().is_empty());
+
+        let t = Local::now() + Duration::seconds(1);
+        set_timer("test".to_string(), t).unwrap();
+
+        let timers = get_timers();
+        assert_eq!(timers.len(), 1);
+        assert_eq!(timers[0].1, "test");
+
+        delete_timer(timers[0].0).unwrap();
+        assert!(get_timers().is_empty());
+    }
+}
