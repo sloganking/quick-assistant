@@ -964,7 +964,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let mut speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick);
+    let mut speak_stream =
+        ss::SpeakStream::new_with_ducking(ai_voice, opt.speech_speed, opt.tick, true);
     if opt.mute {
         speak_stream.mute();
     }
