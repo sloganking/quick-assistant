@@ -4969,6 +4969,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "speakstream"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1c6aa9c0bd2e9cabe1a2e4b704d772d0f903cd36ce1487f9deac4407c44ea86"
+dependencies = [
+ "anyhow",
+ "async-openai",
+ "async-std",
+ "colored",
+ "cpal",
+ "flume",
+ "futures",
+ "once_cell",
+ "rodio",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
