@@ -25,6 +25,7 @@ use futures::stream::StreamExt; // For `.next()` on FuturesOrdered.
 use std::thread;
 use tempfile::Builder;
 mod record;
+mod web_search;
 use crate::default_device_sink::{
     default_device_name as get_default_output_device,
     list_output_devices as list_audio_output_devices, set_output_device, DefaultDeviceSink,
@@ -58,6 +59,7 @@ use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 use speakstream::ss::SpeakStream;
+use web_search::search_web;
 
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {
@@ -431,6 +433,22 @@ fn call_fn(
                 Ok(loc) => Some(format!("Approximate location: {}", loc)),
                 Err(err) => Some(format!("Failed to get location: {}", err)),
             },
+            Err(err) => Some(format!("Failed to create runtime: {}", err)),
+        },
+
+        "search_web" => match tokio::runtime::Runtime::new() {
+            Ok(rt) => {
+                let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+                let query = args["query"].as_str().unwrap_or("");
+                let api_key = match std::env::var("OPENAI_API_KEY") {
+                    Ok(k) => k,
+                    Err(_) => return Some("OPENAI_API_KEY not set".to_string()),
+                };
+                match rt.block_on(search_web(&api_key, query)) {
+                    Ok(ans) => Some(ans),
+                    Err(err) => Some(format!("Web search failed: {}", err)),
+                }
+            }
             Err(err) => Some(format!("Failed to create runtime: {}", err)),
         },
 
@@ -1578,13 +1596,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }))
                                     .build().unwrap(),
 
-                              ChatCompletionFunctionsArgs::default()
+                                ChatCompletionFunctionsArgs::default()
                                     .name("get_location")
                                     .description("Returns an approximate location based on the machine's IP address.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("search_web")
+                                    .description("Searches the web using OpenAI's browser tool.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "query": { "type": "string" } },
+                                        "required": ["query"],
                                     }))
                                     .build().unwrap(),
 
