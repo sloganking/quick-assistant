@@ -9,26 +9,30 @@ use std::{
 use tempfile::tempdir;
 use tracing::{debug, instrument};
 
-/// Moves audio to mp3.
+/// Converts audio to opus.
 /// Ignores output's extension if it is passed one.
 /// Returns the new path.
 #[instrument(skip_all)]
-fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Error> {
+fn move_audio_to_opus(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Error> {
     let mut output = PathBuf::from(output);
-    output.set_extension("mp3");
+    output.set_extension("opus");
 
-    debug!("Running ffmpeg to convert audio to mp3.");
-    // `ffmpeg -i input.mp4 -q:a 0 -map a output.mp3`
+    debug!("Running ffmpeg to convert audio to opus.");
+    // `ffmpeg -i input.wav -c:a libopus -b:a 24k -application voip -frame_duration 20 output.opus`
     let _ = match Command::new("ffmpeg")
         .args([
             "-i",
             input
                 .to_str()
                 .context("Failed to convert input path to string")?,
-            "-q:a",
-            "0",
-            "-map",
-            "a",
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "24k",
+            "-application",
+            "voip",
+            "-frame_duration",
+            "20",
             output
                 .to_str()
                 .context("Failed to convert output path to string")?,
@@ -45,7 +49,7 @@ fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Err
             }
         }
     };
-    debug!("ffmpeg succeeded converting audio to mp3.");
+    debug!("ffmpeg succeeded converting audio to opus.");
 
     Ok(output)
 }
@@ -56,24 +60,24 @@ pub async fn transcribe(
     input: &Path,
 ) -> Result<String, Box<dyn Error>> {
     let tmp_dir = tempdir().context("Failed to create temp dir.")?;
-    let tmp_mp3_path = tmp_dir.path().join("tmp.mp3");
+    let tmp_opus_path = tmp_dir.path().join("tmp.opus");
 
-    // Make input file an mp3 if it is not
+    // Make input file an opus if it is not
     // We do this to get around the api file size limit:
     // Error: ApiError(ApiError { message: "Maximum content size limit (26214400) exceeded (26228340 bytes read)", type: "server_error", param: None, code: None })
-    let input_mp3 = if input.extension().unwrap_or_default() != "mp3" {
+    let input_opus = if input.extension().unwrap_or_default() != "opus" {
         // println!("{:?}", tmp_dir.path());
-        debug!("Converting audio to mp3.");
-        move_audio_to_mp3(input, &tmp_mp3_path).context("Failed to convert audio to mp3.")?
+        debug!("Converting audio to opus.");
+        move_audio_to_opus(input, &tmp_opus_path).context("Failed to convert audio to opus.")?
     } else {
         // println!("{:?}", input);
-        debug!("Audio is already mp3.");
+        debug!("Audio is already opus.");
         PathBuf::from(input)
     };
 
     debug!("creating transcription request.");
     let request = CreateTranscriptionRequestArgs::default()
-            .file(input_mp3)
+            .file(input_opus)
             .model("whisper-1")
             .prompt("And now, a transcription from random language(s) that concludes with perfect punctuation: ")
             .build()
