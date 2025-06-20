@@ -1492,6 +1492,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c297a1c74b71ae29df00c3e22dd9534821d60eb9af5a0192823fa2acea70c2a"
 
 [[package]]
+name = "default-device-sink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca2dc7fa1e66bc2bc8e0d35995f57effa7ee2e83f0a13f24451ab9aa49f8da76"
+dependencies = [
+ "cpal",
+ "once_cell",
+ "rodio",
+]
+
+[[package]]
 name = "deranged"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4970,15 +4981,16 @@ dependencies = [
 
 [[package]]
 name = "speakstream"
-version = "0.1.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ac2ab99a11504b6b9825407f7046dd7b09e7c31a67e87b1582e8c46c27e52ea"
+checksum = "3f27ea8ea7c98f4db2b41ca5a641efb2d70657610345f9bb870b8f417e13eff2"
 dependencies = [
  "anyhow",
  "async-openai",
  "async-std",
  "colored",
  "cpal",
+ "default-device-sink",
  "flume",
  "futures",
  "once_cell",
