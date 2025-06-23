@@ -6,6 +6,9 @@
 - Add, remove, or modify tests as needed when making code changes.
 - Always run the full test suite after updates.
 
+## Crate source lookup
+If you need to inspect a crate that isn't in the repo, add it to `Cargo.toml` and run `cargo build`. Cargo downloads the crate sources to `~/.cargo/registry/src`, where you can browse them.
+
 ### Specification
 
 You can extend Gitmoji and make it your own, but in case you want to follow the official specification, please continue reading 👀
