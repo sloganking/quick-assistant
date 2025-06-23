@@ -978,8 +978,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let mut speak_stream =
-        ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick, true);
+    let mut speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick, true);
     if opt.mute {
         speak_stream.mute();
     }
@@ -1572,9 +1571,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }))
                                     .build().unwrap(),
 
+
                                 ChatCompletionFunctionsArgs::default()
                                     .name("set_voice")
-                                    .description("Changes the AI speaking voice. Pass one of: alloy, echo, fable, onyx, nova, shimmer.")
+                                    .description("Changes the AI speaking voice. Pass one of: alloy, ash, coral, echo, fable, onyx, nova, sage, shimmer.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": { "voice": { "type": "string" } },
