@@ -1700,6 +1700,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "easy_rdev_key"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a235c249bd4457a6e7f965fad371abdb77af6be01eeebbc884558051355d04df"
+dependencies = [
+ "clap",
+ "rdev",
+]
+
+[[package]]
 name = "either"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4108,6 +4118,7 @@ dependencies = [
  "csv",
  "dirs",
  "dotenvy",
+ "easy_rdev_key",
  "enigo",
  "flume",
  "futures",
@@ -4188,7 +4199,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

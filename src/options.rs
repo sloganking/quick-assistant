@@ -1,6 +1,6 @@
+use crate::{SubCommands, VoiceEnum};
 use clap::Parser;
-
-use crate::{easy_rdev_key, SubCommands, VoiceEnum};
+use easy_rdev_key::PTTKey;
 
 #[derive(Parser, Debug)]
 #[command(version)]
