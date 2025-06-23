@@ -70,10 +70,13 @@ pub enum SubCommands {
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum VoiceEnum {
     Alloy,
+    Ash,
+    Coral,
     Echo,
     Fable,
     Onyx,
     Nova,
+    Sage,
     Shimmer,
 }
 
@@ -81,10 +84,13 @@ impl From<VoiceEnum> for Voice {
     fn from(item: VoiceEnum) -> Self {
         match item {
             VoiceEnum::Alloy => Voice::Alloy,
+            VoiceEnum::Ash => Voice::Ash,
+            VoiceEnum::Coral => Voice::Coral,
             VoiceEnum::Echo => Voice::Echo,
             VoiceEnum::Fable => Voice::Fable,
             VoiceEnum::Onyx => Voice::Onyx,
             VoiceEnum::Nova => Voice::Nova,
+            VoiceEnum::Sage => Voice::Sage,
             VoiceEnum::Shimmer => Voice::Shimmer,
         }
     }
@@ -116,10 +122,13 @@ fn truncate(s: &str, len: usize) -> String {
 fn parse_voice(name: &str) -> Option<Voice> {
     match name.to_lowercase().as_str() {
         "alloy" => Some(Voice::Alloy),
+        "ash" => Some(Voice::Ash),
+        "coral" => Some(Voice::Coral),
         "echo" => Some(Voice::Echo),
         "fable" => Some(Voice::Fable),
         "onyx" => Some(Voice::Onyx),
         "nova" => Some(Voice::Nova),
+        "sage" => Some(Voice::Sage),
         "shimmer" => Some(Voice::Shimmer),
         _ => None,
     }
@@ -128,10 +137,13 @@ fn parse_voice(name: &str) -> Option<Voice> {
 fn voice_to_str(voice: &Voice) -> &'static str {
     match voice {
         Voice::Alloy => "alloy",
+        Voice::Ash => "ash",
+        Voice::Coral => "coral",
         Voice::Echo => "echo",
         Voice::Fable => "fable",
         Voice::Onyx => "onyx",
         Voice::Nova => "nova",
+        Voice::Sage => "sage",
         Voice::Shimmer => "shimmer",
         _ => "unknown",
     }
@@ -158,8 +170,10 @@ mod tests {
 
     #[test]
     fn parse_voice_and_voice_to_str_roundtrip() {
-        let voice = parse_voice("Alloy").expect("voice should parse");
-        assert_eq!(voice_to_str(&voice), "alloy");
+        for name in ["Alloy", "Ash", "Coral", "Sage"] {
+            let voice = parse_voice(name).expect("voice should parse");
+            assert_eq!(voice_to_str(&voice), name.to_lowercase());
+        }
         assert!(parse_voice("doesnotexist").is_none());
     }
 }
@@ -965,7 +979,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         None => Voice::Echo,
     };
     let mut speak_stream =
-        ss::SpeakStream::new_with_ducking(ai_voice, opt.speech_speed, opt.tick, true);
+        ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick, true);
     if opt.mute {
         speak_stream.mute();
     }
