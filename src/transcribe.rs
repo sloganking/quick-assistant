@@ -19,7 +19,7 @@ fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Err
 
     debug!("Running ffmpeg to convert audio to mp3.");
     // `ffmpeg -i input.mp4 -q:a 0 -map a output.mp3`
-    let _ = match Command::new("ffmpeg")
+    let cmd_output = match Command::new("ffmpeg")
         .args([
             "-i",
             input
@@ -45,6 +45,11 @@ fn move_audio_to_mp3(input: &Path, output: &Path) -> Result<PathBuf, anyhow::Err
             }
         }
     };
+
+    if !cmd_output.status.success() {
+        bail!("ffmpeg failed to convert audio");
+    }
+
     debug!("ffmpeg succeeded converting audio to mp3.");
 
     Ok(output)
@@ -87,4 +92,37 @@ pub async fn transcribe(
         .context("Failed to get OpenAI API transcription response.")?;
 
     Ok(response.text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+
+    #[test]
+    fn move_audio_to_mp3_fails_if_ffmpeg_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let ffmpeg_path = dir.path().join("ffmpeg");
+        fs::write(&ffmpeg_path, "#!/bin/sh\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&ffmpeg_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&ffmpeg_path, perms).unwrap();
+        }
+
+        let old_path = env::var("PATH").unwrap_or_default();
+        env::set_var("PATH", format!("{}:{}", dir.path().display(), old_path));
+
+        let input = dir.path().join("in.wav");
+        fs::write(&input, b"dummy").unwrap();
+        let out = dir.path().join("out.mp3");
+
+        let res = move_audio_to_mp3(&input, &out);
+        assert!(res.is_err());
+
+        env::set_var("PATH", old_path);
+    }
 }
