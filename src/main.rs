@@ -17,6 +17,7 @@ use timers::*;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
+mod convert;
 mod default_device_sink;
 mod timers;
 mod transcribe;
@@ -564,6 +565,44 @@ fn call_fn(
             match clipboard.set_contents(clipboard_text.to_string()) {
                 Ok(_) => Some("Clipboard set successfully.".to_string()),
                 Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
+            }
+        }
+
+        "convert_clipboard_file" => {
+            let args = match serde_json::from_str::<serde_json::Value>(fn_args) {
+                Ok(json) => json,
+                Err(e) => return Some(format!("Failed to parse arguments: {}", e)),
+            };
+
+            let output_ext = match args["output_ext"].as_str() {
+                Some(ext) => ext,
+                None => return Some("Missing 'output_ext' argument.".to_string()),
+            };
+
+            let mut clipboard: ClipboardContext = match ClipboardProvider::new() {
+                Ok(c) => c,
+                Err(e) => return Some(format!("Failed to initialize clipboard: {}", e)),
+            };
+
+            let clipboard_text = match clipboard.get_contents() {
+                Ok(t) => t,
+                Err(e) => return Some(format!("Failed to read clipboard contents: {}", e)),
+            };
+
+            let input_path = Path::new(clipboard_text.trim());
+            if !input_path.is_file() {
+                return Some("Clipboard does not contain a valid file path.".to_string());
+            }
+
+            match convert::convert_with_ffmpeg(input_path, output_ext) {
+                Ok(out) => match clipboard.set_contents(out.to_string_lossy().to_string()) {
+                    Ok(_) => Some(format!(
+                        "Converted file copied to clipboard as {}",
+                        out.display()
+                    )),
+                    Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
+                },
+                Err(e) => Some(format!("Failed to convert file: {}", e)),
             }
         }
 
@@ -1527,6 +1566,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             "clipboard_text": { "type": "string" },
                                         },
                                         "required": ["clipboard_text"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("convert_clipboard_file")
+                                    .description("Converts the file pointed to by clipboard text to another format using ffmpeg and copies the new file path to the clipboard.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {"output_ext": {"type": "string"}},
+                                        "required": ["output_ext"],
                                     }))
                                     .build().unwrap(),
 
