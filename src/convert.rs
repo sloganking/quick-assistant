@@ -2,6 +2,8 @@ use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
+#[cfg(target_os = "windows")]
+use clipboard_win::{formats::FileList, Clipboard, Getter, Setter};
 
 /// Convert `input` to `output_ext` using ffmpeg and return the path
 /// to the converted file.
@@ -30,6 +32,40 @@ pub fn convert_with_ffmpeg(input: &Path, output_ext: &str) -> Result<PathBuf> {
     }
 
     Ok(out_path)
+}
+
+/// Convert the file currently stored in the clipboard to `output_ext`
+/// using ffmpeg and put the resulting file back on the clipboard.
+///
+/// On non-Windows platforms this returns an error.
+#[cfg(target_os = "windows")]
+pub fn convert_clipboard_file(output_ext: &str) -> Result<PathBuf> {
+    let _clip = Clipboard::new_attempts(10)
+        .map_err(|e| anyhow::anyhow!("Failed to open clipboard: {e:?}"))?;
+
+    let mut files = Vec::<PathBuf>::new();
+    FileList
+        .read_clipboard(&mut files)
+        .map_err(|e| anyhow::anyhow!("Failed to read clipboard files: {e:?}"))?;
+
+    let input = files
+        .get(0)
+        .cloned()
+        .context("Clipboard does not contain a file")?;
+
+    let out = convert_with_ffmpeg(&input, output_ext)?;
+
+    let out_str = out.to_string_lossy().to_string();
+    FileList
+        .write_clipboard(&[out_str.as_str()])
+        .map_err(|e| anyhow::anyhow!("Failed to set clipboard files: {e:?}"))?;
+
+    Ok(out)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn convert_clipboard_file(_output_ext: &str) -> Result<PathBuf> {
+    bail!("convert_clipboard_file is only supported on Windows")
 }
 
 #[cfg(test)]

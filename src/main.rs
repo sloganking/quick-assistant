@@ -579,30 +579,12 @@ fn call_fn(
                 None => return Some("Missing 'output_ext' argument.".to_string()),
             };
 
-            let mut clipboard: ClipboardContext = match ClipboardProvider::new() {
-                Ok(c) => c,
-                Err(e) => return Some(format!("Failed to initialize clipboard: {}", e)),
-            };
-
-            let clipboard_text = match clipboard.get_contents() {
-                Ok(t) => t,
-                Err(e) => return Some(format!("Failed to read clipboard contents: {}", e)),
-            };
-
-            let input_path = Path::new(clipboard_text.trim());
-            if !input_path.is_file() {
-                return Some("Clipboard does not contain a valid file path.".to_string());
-            }
-
-            match convert::convert_with_ffmpeg(input_path, output_ext) {
-                Ok(out) => match clipboard.set_contents(out.to_string_lossy().to_string()) {
-                    Ok(_) => Some(format!(
-                        "Converted file copied to clipboard as {}",
-                        out.display()
-                    )),
-                    Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
-                },
-                Err(e) => Some(format!("Failed to convert file: {}", e)),
+            match convert::convert_clipboard_file(output_ext) {
+                Ok(out) => Some(format!(
+                    "Converted file copied to clipboard as {}",
+                    out.display()
+                )),
+                Err(e) => Some(format!("Failed to convert clipboard file: {}", e)),
             }
         }
 
@@ -1571,7 +1553,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("convert_clipboard_file")
-                                    .description("Converts the file pointed to by clipboard text to another format using ffmpeg and copies the new file path to the clipboard.")
+                                    .description("Converts the file currently stored in the clipboard to another format using ffmpeg and copies the new file back to the clipboard.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {"output_ext": {"type": "string"}},
