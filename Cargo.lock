@@ -5031,9 +5031,9 @@ dependencies = [
 
 [[package]]
 name = "speakstream"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d70e51311088a65af118642cc951f308b5e1c760143349c656c3711e579760e"
+checksum = "b1f94a1ce24182081310e8a08bb9c7d1b4b5a21b7d2e4a9a6d72f5cc670fc819"
 dependencies = [
  "anyhow",
  "async-openai",
