@@ -17,6 +17,7 @@ use timers::*;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
+mod convert;
 mod default_device_sink;
 mod timers;
 mod transcribe;
@@ -564,6 +565,26 @@ fn call_fn(
             match clipboard.set_contents(clipboard_text.to_string()) {
                 Ok(_) => Some("Clipboard set successfully.".to_string()),
                 Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
+            }
+        }
+
+        "convert_clipboard_file" => {
+            let args = match serde_json::from_str::<serde_json::Value>(fn_args) {
+                Ok(json) => json,
+                Err(e) => return Some(format!("Failed to parse arguments: {}", e)),
+            };
+
+            let output_ext = match args["output_ext"].as_str() {
+                Some(ext) => ext,
+                None => return Some("Missing 'output_ext' argument.".to_string()),
+            };
+
+            match convert::convert_clipboard_file(output_ext) {
+                Ok(out) => Some(format!(
+                    "Converted file copied to clipboard as {}",
+                    out.display()
+                )),
+                Err(e) => Some(format!("Failed to convert clipboard file: {}", e)),
             }
         }
 
@@ -1527,6 +1548,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             "clipboard_text": { "type": "string" },
                                         },
                                         "required": ["clipboard_text"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("convert_clipboard_file")
+                                    .description("Converts the file currently stored in the clipboard to another format using ffmpeg and copies the new file back to the clipboard.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {"output_ext": {"type": "string"}},
+                                        "required": ["output_ext"],
                                     }))
                                     .build().unwrap(),
 
