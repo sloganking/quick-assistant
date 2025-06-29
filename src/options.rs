@@ -33,6 +33,10 @@ pub struct Opt {
     #[arg(long)]
     pub tick: bool,
 
+    /// Duck other application audio while the push-to-talk key is held down.
+    #[arg(long)]
+    pub duck_ptt: bool,
+
     /// Start with the AI voice muted.
     #[arg(long)]
     pub mute: bool,
