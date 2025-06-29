@@ -18,7 +18,6 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
 mod default_device_sink;
-mod speak_stream_ext;
 mod timers;
 mod transcribe;
 use chrono::{DateTime, Local};
@@ -54,11 +53,9 @@ use uuid::Uuid;
 mod options;
 #[cfg(target_os = "windows")]
 mod windows_volume;
+use speakstream::ss::SpeakStream;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-
-use crate::speak_stream_ext::SpeakStreamExt;
-use speakstream::ss::SpeakStream;
 
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {
