@@ -1,6 +1,5 @@
 use crate::{SubCommands, VoiceEnum};
 use clap::Parser;
-use easy_rdev_key::PTTKey;
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -32,6 +31,10 @@ pub struct Opt {
     /// Play a ticking sound while the AI is converting text to speech.
     #[arg(long)]
     pub tick: bool,
+
+    /// Duck other application audio while the push-to-talk key is held down.
+    #[arg(long)]
+    pub duck_ptt: bool,
 
     /// Start with the AI voice muted.
     #[arg(long)]

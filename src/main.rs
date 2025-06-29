@@ -53,10 +53,9 @@ use uuid::Uuid;
 mod options;
 #[cfg(target_os = "windows")]
 mod windows_volume;
+use speakstream::ss::SpeakStream;
 use tracing::{debug, error, info, instrument, warn};
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
-
-use speakstream::ss::SpeakStream;
 
 #[derive(Debug, Subcommand)]
 pub enum SubCommands {
@@ -1072,6 +1071,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // It then sends the path of the recorded audio file to the AI thread.
             let thread_llm_should_stop_mutex = llm_should_stop_mutex.clone();
             let thread_speak_stream_mutex = speak_stream_mutex.clone();
+            let duck_ptt = opt.duck_ptt;
             thread::spawn(move || {
                 let mut recorder = rec::Recorder::new();
                 let mut recording_start = std::time::SystemTime::now();
@@ -1100,6 +1100,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     let mut thread_speak_stream =
                                         thread_speak_stream_mutex.lock().unwrap();
                                     thread_speak_stream.stop_speech();
+                                    if duck_ptt {
+                                        thread_speak_stream.start_audio_ducking();
+                                    }
                                     drop(thread_speak_stream);
                                 }
 
@@ -1147,6 +1150,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         ));
                                         continue;
                                     }
+                                }
+
+                                if duck_ptt {
+                                    let mut thread_speak_stream =
+                                        thread_speak_stream_mutex.lock().unwrap();
+                                    thread_speak_stream.stop_audio_ducking();
+                                    drop(thread_speak_stream);
                                 }
 
                                 // continue if we failed to get elapsed time

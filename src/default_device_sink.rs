@@ -153,7 +153,7 @@ impl DefaultDeviceSink {
             let speed = inner.sink.speed();
             let paused = inner.sink.is_paused();
 
-            let (stream, mut new_sink, name) = Self::create_stream();
+            let (stream, new_sink, name) = Self::create_stream();
             new_sink.set_volume(volume);
             new_sink.set_speed(speed);
 
