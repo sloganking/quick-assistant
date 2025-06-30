@@ -7,6 +7,9 @@ use async_openai::{
     },
     Client,
 };
+use clap::Parser;
+use clipboard::{ClipboardContext, ClipboardProvider};
+use colored::Colorize;
 use dotenvy::dotenv;
 use futures::StreamExt;
 use speakstream::ss::SpeakStream;
@@ -16,17 +19,19 @@ use clipboard::{ClipboardContext, ClipboardProvider};
 use open;
 use std::error::Error;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod record;
 mod transcribe;
-use record::rec;
+use flume::Sender;
 use rdev::{listen, Event, EventType, Key};
+use record::rec;
+use std::thread;
 use tempfile::tempdir;
 use flume::Sender;
 use uuid::Uuid;
-use std::thread;
 
 #[derive(Parser, Debug)]
 struct Opt {
@@ -155,10 +160,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )));
 
     let (audio_tx, audio_rx) = flume::unbounded();
-    start_ptt_thread(audio_tx.clone(), speak_stream.clone(), opt.duck_ptt);
+    let interrupt_flag = Arc::new(AtomicBool::new(false));
+    start_ptt_thread(
+        audio_tx.clone(),
+        speak_stream.clone(),
+        opt.duck_ptt,
+        interrupt_flag.clone(),
+    );
 
     loop {
         let audio_path = audio_rx.recv().unwrap();
+        interrupt_flag.store(false, Ordering::SeqCst);
         let transcription = transcribe::transcribe(&client, &audio_path).await?;
         println!("{}", "You: ".truecolor(0, 255, 0));
         println!("{}", transcription);
@@ -187,23 +199,45 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let client_cloned = client.clone();
         let mut task_handle = None;
         let mut displayed_ai_label = false;
+        let mut run_id: Option<String> = None;
 
         while let Some(event) = event_stream.next().await {
+            if interrupt_flag.swap(false, Ordering::SeqCst) {
+                if let Some(id) = &run_id {
+                    let _ = client.threads().runs(&thread.id).cancel(id).await;
+                }
+                break;
+            }
             match event {
-                Ok(event) => match event {
-                    AssistantStreamEvent::ThreadRunRequiresAction(run_object) => {
-                        let client = client_cloned.clone();
-                        let speak_stream = speak_stream_cloned.clone();
-                        task_handle = Some(tokio::spawn(async move {
-                            handle_requires_action(client, run_object, speak_stream).await
-                        }));
+                Ok(evt) => match &evt {
+                    AssistantStreamEvent::ThreadRunCreated(obj)
+                    | AssistantStreamEvent::ThreadRunQueued(obj)
+                    | AssistantStreamEvent::ThreadRunInProgress(obj)
+                    | AssistantStreamEvent::ThreadRunRequiresAction(obj)
+                    | AssistantStreamEvent::ThreadRunCompleted(obj)
+                    | AssistantStreamEvent::ThreadRunFailed(obj)
+                    | AssistantStreamEvent::ThreadRunCancelled(obj)
+                    | AssistantStreamEvent::ThreadRunIncomplete(obj)
+                    | AssistantStreamEvent::ThreadRunExpired(obj)
+                    | AssistantStreamEvent::ThreadRunCancelling(obj) => {
+                        if run_id.is_none() {
+                            run_id = Some(obj.id.clone());
+                        }
+                        if matches!(evt, AssistantStreamEvent::ThreadRunRequiresAction(_)) {
+                            let client = client_cloned.clone();
+                            let speak_stream = speak_stream_cloned.clone();
+                            let run_obj = obj.clone();
+                            task_handle = Some(tokio::spawn(async move {
+                                handle_requires_action(client, run_obj, speak_stream).await
+                            }));
+                        }
                     }
                     AssistantStreamEvent::ThreadMessageDelta(delta) => {
-                        if let Some(contents) = delta.delta.content {
+                        if let Some(contents) = &delta.delta.content {
                             for content in contents {
                                 if let MessageDeltaContent::Text(text) = content {
-                                    if let Some(text) = text.text {
-                                        if let Some(text) = text.value {
+                                    if let Some(text) = &text.text {
+                                        if let Some(text) = &text.value {
                                             if !displayed_ai_label {
                                                 print!("{}", "AI: ".truecolor(0, 0, 255));
                                                 displayed_ai_label = true;
@@ -231,7 +265,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn start_ptt_thread(audio_tx: Sender<PathBuf>, speak_stream: Arc<Mutex<SpeakStream>>, duck_ptt: bool) {
+fn start_ptt_thread(
+    audio_tx: Sender<PathBuf>,
+    speak_stream: Arc<Mutex<SpeakStream>>,
+    duck_ptt: bool,
+    interrupt_flag: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         let mut recorder = rec::Recorder::new();
         let tmp_dir = tempdir().unwrap();
@@ -239,31 +278,34 @@ fn start_ptt_thread(audio_tx: Sender<PathBuf>, speak_stream: Arc<Mutex<SpeakStre
         let ptt_key = Key::F9;
         let mut current_path: Option<PathBuf> = None;
 
-        let callback = move |event: Event| {
-            match event.event_type {
-                EventType::KeyPress(key) if key == ptt_key && !key_pressed => {
-                    key_pressed = true;
+        let callback = move |event: Event| match event.event_type {
+            EventType::KeyPress(key) if key == ptt_key && !key_pressed => {
+                key_pressed = true;
+                interrupt_flag.store(true, Ordering::SeqCst);
+                {
+                    let mut ss = speak_stream.lock().unwrap();
+                    ss.stop_speech();
                     if duck_ptt {
-                        speak_stream.lock().unwrap().start_audio_ducking();
-                    }
-                    let path = tmp_dir.path().join(format!("{}.wav", Uuid::new_v4()));
-                    if recorder.start_recording(&path, None).is_ok() {
-                        current_path = Some(path);
+                        ss.start_audio_ducking();
                     }
                 }
-                EventType::KeyRelease(key) if key == ptt_key && key_pressed => {
-                    key_pressed = false;
-                    if recorder.stop_recording().is_ok() {
-                        if let Some(p) = current_path.take() {
-                            audio_tx.send(p).unwrap();
-                        }
-                    }
-                    if duck_ptt {
-                        speak_stream.lock().unwrap().stop_audio_ducking();
-                    }
+                let path = tmp_dir.path().join(format!("{}.wav", Uuid::new_v4()));
+                if recorder.start_recording(&path, None).is_ok() {
+                    current_path = Some(path);
                 }
-                _ => {}
             }
+            EventType::KeyRelease(key) if key == ptt_key && key_pressed => {
+                key_pressed = false;
+                if recorder.stop_recording().is_ok() {
+                    if let Some(p) = current_path.take() {
+                        audio_tx.send(p).unwrap();
+                    }
+                }
+                if duck_ptt {
+                    speak_stream.lock().unwrap().stop_audio_ducking();
+                }
+            }
+            _ => {}
         };
 
         if let Err(e) = listen(callback) {
@@ -297,7 +339,8 @@ async fn handle_requires_action(
 
             if tool.function.name == "set_clipboard" {
                 let mut clipboard: ClipboardContext = ClipboardProvider::new().unwrap();
-                let text = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                let text = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments)
+                {
                     Ok(v) => v["clipboard_text"].as_str().unwrap_or("").to_string(),
                     Err(_) => String::new(),
                 };
