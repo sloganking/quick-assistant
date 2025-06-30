@@ -431,6 +431,7 @@ async fn handle_requires_action(
 
     if let Some(required_action) = &run_object.required_action {
         for tool in &required_action.submit_tool_outputs.tool_calls {
+            println!("{}{}", "Invoking function: ".purple(), tool.function.name);
             if tool.function.name == "get_current_temperature" {
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
