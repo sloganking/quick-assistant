@@ -107,3 +107,7 @@ List of Gitmojis and their meaning:
     * 🧵  Add or update code related to multithreading or concurrency
     * 🦺  Add or update code related to validation
     * ✈️  Improve offline support
+
+## Assistant V2 Migration
+- New work on `assistant_v2` should record feature migration status in `assistant_v2/FEATURE_PROGRESS.md`.
+- When a feature is fully transferred and tested, update that file and mention the change in commit messages.
