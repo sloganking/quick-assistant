@@ -7,10 +7,6 @@ edition = "2024"
 name = "assistant_v2"
 path = "src/main.rs"
 
-[[bin]]
-name = "code_interpreter"
-path = "src/code_interpreter.rs"
-
 [dependencies]
 async-openai = "0.28.3"
 tokio = { version = "1.29.0", features = ["macros", "rt-multi-thread"] }

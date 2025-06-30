@@ -1,9 +1,10 @@
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        AssistantStreamEvent, CreateAssistantRequestArgs, CreateMessageRequest, CreateRunRequest,
-        CreateThreadRequest, FunctionObject, MessageDeltaContent, MessageRole, RunObject,
-        SubmitToolOutputsRunRequest, ToolsOutputs, Voice,
+        AssistantStreamEvent, AssistantToolCodeInterpreterResources, AssistantTools,
+        CreateAssistantRequestArgs, CreateFileRequest, CreateMessageRequest, CreateRunRequest,
+        CreateThreadRequest, FilePurpose, FunctionObject, MessageContent, MessageContentTextAnnotations,
+        MessageDeltaContent, MessageRole, RunObject, SubmitToolOutputsRunRequest, ToolsOutputs, Voice,
     },
     Client,
 };
@@ -14,6 +15,7 @@ use colored::Colorize;
 use clap::Parser;
 use clipboard::{ClipboardContext, ClipboardProvider};
 use open;
+use std::collections::HashSet;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -55,10 +57,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = Client::new();
 
+    let data_file = client
+        .files()
+        .create(CreateFileRequest {
+            file: "./input/CASTHPI.csv".into(),
+            purpose: FilePurpose::Assistants,
+        })
+        .await?;
+
     let create_assistant_request = CreateAssistantRequestArgs::default()
         .instructions("You are a weather bot. Use the provided functions to answer questions.")
         .model("gpt-4o")
         .tools(vec![
+            AssistantTools::CodeInterpreter,
             FunctionObject {
                 name: "get_current_temperature".into(),
                 description: Some(
@@ -125,6 +136,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             .into(),
         ])
+        .tool_resources(AssistantToolCodeInterpreterResources { file_ids: vec![data_file.id.clone()] })
         .build()?;
 
     let assistant = client.assistants().create(create_assistant_request).await?;
@@ -143,6 +155,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (audio_tx, audio_rx) = flume::unbounded();
     start_ptt_thread(audio_tx.clone(), speak_stream.clone(), opt.duck_ptt);
+
+    std::fs::create_dir_all("output").ok();
+    let mut seen_messages: HashSet<String> = HashSet::new();
 
     loop {
         let audio_path = audio_rx.recv().unwrap();
@@ -174,6 +189,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let client_cloned = client.clone();
         let mut task_handle = None;
         let mut displayed_ai_label = false;
+        let mut run_completed = false;
 
         while let Some(event) = event_stream.next().await {
             match event {
@@ -203,6 +219,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                     }
+                    AssistantStreamEvent::ThreadRunCompleted(_) => {
+                        run_completed = true;
+                    }
+                    AssistantStreamEvent::Done(_) => {
+                        break;
+                    }
                     _ => {}
                 },
                 Err(e) => eprintln!("Error: {e}"),
@@ -215,6 +237,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         speak_stream.lock().unwrap().complete_sentence();
         println!();
+
+        if run_completed {
+            if let Err(e) = print_new_messages(&client, &thread.id, &mut seen_messages).await {
+                eprintln!("Error retrieving messages: {e}");
+            }
+        }
     }
 }
 
@@ -362,6 +390,56 @@ async fn submit_tool_outputs(
     Ok(())
 }
 
+async fn print_new_messages(
+    client: &Client<OpenAIConfig>,
+    thread_id: &str,
+    seen: &mut HashSet<String>,
+) -> Result<(), Box<dyn Error>> {
+    let messages = client
+        .threads()
+        .messages(thread_id)
+        .list(&[("limit", "20")])
+        .await?;
+
+    for message in messages.data {
+        if seen.insert(message.id.clone()) {
+            for content in message.content {
+                match content {
+                    MessageContent::Text(text) => {
+                        let data = text.text;
+                        println!("{}", data.value);
+                        for ann in data.annotations {
+                            match ann {
+                                MessageContentTextAnnotations::FileCitation(cit) => {
+                                    println!("annotation: file citation: {:?}", cit);
+                                }
+                                MessageContentTextAnnotations::FilePath(fp) => {
+                                    println!("annotation: file path: {:?}", fp);
+                                }
+                            }
+                        }
+                    }
+                    MessageContent::ImageFile(obj) => {
+                        let file_id = obj.image_file.file_id;
+                        let contents = client.files().content(&file_id).await?;
+                        let path = format!("output/{}.png", file_id);
+                        tokio::fs::write(&path, contents).await?;
+                        println!("Saved image to {path}");
+                    }
+                    MessageContent::ImageUrl(u) => {
+                        println!("Image URL: {:?}", u);
+                    }
+                    MessageContent::Refusal(r) => {
+                        println!("{r:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,5 +478,17 @@ mod tests {
             async_openai::types::AssistantTools::Function(f) => f.function.name == "open_openai_billing",
             _ => false,
         }));
+    }
+
+    #[test]
+    fn includes_code_interpreter_tool() {
+        let req = CreateAssistantRequestArgs::default()
+            .model("gpt-4o")
+            .tools(vec![AssistantTools::CodeInterpreter])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| matches!(t, AssistantTools::CodeInterpreter)));
     }
 }
