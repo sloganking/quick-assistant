@@ -3,14 +3,26 @@ use async_openai::{
     types::{
         AssistantStreamEvent, CreateAssistantRequestArgs, CreateMessageRequest, CreateRunRequest,
         CreateThreadRequest, FunctionObject, MessageDeltaContent, MessageRole, RunObject,
-        SubmitToolOutputsRunRequest, ToolsOutputs,
+        SubmitToolOutputsRunRequest, ToolsOutputs, Voice,
     },
     Client,
 };
 use dotenvy::dotenv;
 use futures::StreamExt;
+use speakstream::ss::SpeakStream;
 use std::error::Error;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+mod record;
+mod transcribe;
+use record::rec;
+use rdev::{listen, Event, EventType, Key};
+use tempfile::tempdir;
+use flume::{Receiver, Sender};
+use uuid::Uuid;
+use std::thread;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -42,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "unit": {
                             "type": "string",
                             "enum": ["Celsius", "Fahrenheit"],
-                            "description": "The temperature unit to use. Infer this from the user's location."
+                            "description": "The temperature unit to use. Infer this from the user's location.",
                         }
                     },
                     "required": ["location", "unit"]
@@ -78,55 +90,119 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .create(CreateThreadRequest::default())
         .await?;
 
-    client
-        .threads()
-        .messages(&thread.id)
-        .create(CreateMessageRequest {
-            role: MessageRole::User,
-            content: "What's the weather in San Francisco today and the likelihood it'll rain?"
-                .into(),
-            ..Default::default()
-        })
-        .await?;
+    let speak_stream = Arc::new(Mutex::new(SpeakStream::new(Voice::Echo, 1.0, true, true)));
 
-    let mut event_stream = client
-        .threads()
-        .runs(&thread.id)
-        .create_stream(CreateRunRequest {
-            assistant_id: assistant.id.clone(),
-            stream: Some(true),
-            ..Default::default()
-        })
-        .await?;
+    let (audio_tx, audio_rx) = flume::unbounded();
+    start_ptt_thread(audio_tx.clone());
 
-    let mut task_handle = None;
+    loop {
+        let audio_path = audio_rx.recv().unwrap();
+        let transcription = transcribe::transcribe(&client, &audio_path).await?;
+        println!("You: {}", transcription);
 
-    while let Some(event) = event_stream.next().await {
-        match event {
-            Ok(event) => match event {
-                AssistantStreamEvent::ThreadRunRequiresAction(run_object) => {
-                    let client = client.clone();
-                    task_handle = Some(tokio::spawn(async move {
-                        handle_requires_action(client, run_object).await
-                    }));
-                }
-                _ => println!("\nEvent: {event:?}\n"),
-            },
-            Err(e) => eprintln!("Error: {e}"),
+        client
+            .threads()
+            .messages(&thread.id)
+            .create(CreateMessageRequest {
+                role: MessageRole::User,
+                content: transcription.into(),
+                ..Default::default()
+            })
+            .await?;
+
+        let mut event_stream = client
+            .threads()
+            .runs(&thread.id)
+            .create_stream(CreateRunRequest {
+                assistant_id: assistant.id.clone(),
+                stream: Some(true),
+                ..Default::default()
+            })
+            .await?;
+
+        let speak_stream_cloned = speak_stream.clone();
+        let client_cloned = client.clone();
+        let mut task_handle = None;
+
+        while let Some(event) = event_stream.next().await {
+            match event {
+                Ok(event) => match event {
+                    AssistantStreamEvent::ThreadRunRequiresAction(run_object) => {
+                        let client = client_cloned.clone();
+                        let speak_stream = speak_stream_cloned.clone();
+                        task_handle = Some(tokio::spawn(async move {
+                            handle_requires_action(client, run_object, speak_stream).await
+                        }));
+                    }
+                    AssistantStreamEvent::ThreadMessageDelta(delta) => {
+                        if let Some(contents) = delta.delta.content {
+                            for content in contents {
+                                if let MessageDeltaContent::Text(text) = content {
+                                    if let Some(text) = text.text {
+                                        if let Some(text) = text.value {
+                                            print!("{}", text);
+                                            speak_stream_cloned.lock().unwrap().add_token(&text);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                Err(e) => eprintln!("Error: {e}"),
+            }
         }
+
+        if let Some(handle) = task_handle {
+            let _ = handle.await;
+        }
+
+        speak_stream.lock().unwrap().complete_sentence();
+        println!();
     }
-
-    if let Some(handle) = task_handle {
-        let _ = handle.await;
-    }
-
-    client.threads().delete(&thread.id).await?;
-    client.assistants().delete(&assistant.id).await?;
-
-    Ok(())
 }
 
-async fn handle_requires_action(client: Client<OpenAIConfig>, run_object: RunObject) {
+fn start_ptt_thread(audio_tx: Sender<PathBuf>) {
+    thread::spawn(move || {
+        let mut recorder = rec::Recorder::new();
+        let tmp_dir = tempdir().unwrap();
+        let mut key_pressed = false;
+        let ptt_key = Key::F9;
+        let mut current_path: Option<PathBuf> = None;
+
+        let callback = move |event: Event| {
+            match event.event_type {
+                EventType::KeyPress(key) if key == ptt_key && !key_pressed => {
+                    key_pressed = true;
+                    let path = tmp_dir.path().join(format!("{}.wav", Uuid::new_v4()));
+                    if recorder.start_recording(&path, None).is_ok() {
+                        current_path = Some(path);
+                    }
+                }
+                EventType::KeyRelease(key) if key == ptt_key && key_pressed => {
+                    key_pressed = false;
+                    if recorder.stop_recording().is_ok() {
+                        if let Some(p) = current_path.take() {
+                            audio_tx.send(p).unwrap();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        };
+
+        if let Err(e) = listen(callback) {
+            eprintln!("Failed to listen for key events: {:?}", e);
+        }
+    });
+}
+
+async fn handle_requires_action(
+    client: Client<OpenAIConfig>,
+    run_object: RunObject,
+    speak_stream: Arc<Mutex<SpeakStream>>,
+) {
     let mut tool_outputs: Vec<ToolsOutputs> = Vec::new();
 
     if let Some(required_action) = &run_object.required_action {
@@ -146,7 +222,7 @@ async fn handle_requires_action(client: Client<OpenAIConfig>, run_object: RunObj
             }
         }
 
-        if let Err(e) = submit_tool_outputs(client, run_object, tool_outputs).await {
+        if let Err(e) = submit_tool_outputs(client, run_object, tool_outputs, speak_stream).await {
             eprintln!("Error on submitting tool outputs: {e}");
         }
     }
@@ -156,6 +232,7 @@ async fn submit_tool_outputs(
     client: Client<OpenAIConfig>,
     run_object: RunObject,
     tool_outputs: Vec<ToolsOutputs>,
+    speak_stream: Arc<Mutex<SpeakStream>>,
 ) -> Result<(), Box<dyn Error>> {
     let mut event_stream = client
         .threads()
@@ -179,6 +256,7 @@ async fn submit_tool_outputs(
                                 if let Some(text) = text.text {
                                     if let Some(text) = text.value {
                                         print!("{}", text);
+                                        speak_stream.lock().unwrap().add_token(&text);
                                     }
                                 }
                             }
@@ -190,6 +268,7 @@ async fn submit_tool_outputs(
         }
     }
 
+    speak_stream.lock().unwrap().complete_sentence();
     Ok(())
 }
 
