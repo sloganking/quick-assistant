@@ -12,11 +12,8 @@ use clipboard::{ClipboardContext, ClipboardProvider};
 use colored::Colorize;
 use dotenvy::dotenv;
 use futures::StreamExt;
-use speakstream::ss::SpeakStream;
-use colored::Colorize;
-use clap::Parser;
-use clipboard::{ClipboardContext, ClipboardProvider};
 use open;
+use speakstream::ss::SpeakStream;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +27,6 @@ use rdev::{listen, Event, EventType, Key};
 use record::rec;
 use std::thread;
 use tempfile::tempdir;
-use flume::Sender;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -356,10 +352,11 @@ async fn handle_requires_action(
             }
 
             if tool.function.name == "set_screen_brightness" {
-                let brightness = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
-                    Ok(v) => v["brightness"].as_i64().unwrap_or(0) as u32,
-                    Err(_) => 0,
-                };
+                let brightness =
+                    match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                        Ok(v) => v["brightness"].as_i64().unwrap_or(0) as u32,
+                        Err(_) => 0,
+                    };
 
                 let result = std::process::Command::new("luster")
                     .arg(brightness.to_string())
@@ -454,25 +451,26 @@ mod tests {
         let req = CreateAssistantRequestArgs::default()
             .instructions("test")
             .model("gpt-4o")
-            .tools(vec![
-                FunctionObject {
-                    name: "open_openai_billing".into(),
-                    description: Some("Opens the OpenAI usage dashboard in the default web browser.".into()),
-                    parameters: Some(serde_json::json!({
-                        "type": "object",
-                        "properties": {},
-                        "required": [],
-                    })),
-                    strict: None,
-                }
-                .into(),
-            ])
+            .tools(vec![FunctionObject {
+                name: "open_openai_billing".into(),
+                description: Some(
+                    "Opens the OpenAI usage dashboard in the default web browser.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
             .build()
             .unwrap();
 
         let tools = req.tools.unwrap();
         assert!(tools.iter().any(|t| match t {
-            async_openai::types::AssistantTools::Function(f) => f.function.name == "open_openai_billing",
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "open_openai_billing",
             _ => false,
         }));
     }
@@ -482,25 +480,26 @@ mod tests {
         let req = CreateAssistantRequestArgs::default()
             .instructions("test")
             .model("gpt-4o")
-            .tools(vec![
-                FunctionObject {
-                    name: "set_screen_brightness".into(),
-                    description: Some("Sets the screen brightness from 0 to 100 using the `luster` utility.".into()),
-                    parameters: Some(serde_json::json!({
-                        "type": "object",
-                        "properties": {"brightness": {"type": "integer"}},
-                        "required": ["brightness"],
-                    })),
-                    strict: None,
-                }
-                .into(),
-            ])
+            .tools(vec![FunctionObject {
+                name: "set_screen_brightness".into(),
+                description: Some(
+                    "Sets the screen brightness from 0 to 100 using the `luster` utility.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"brightness": {"type": "integer"}},
+                    "required": ["brightness"],
+                })),
+                strict: None,
+            }
+            .into()])
             .build()
             .unwrap();
 
         let tools = req.tools.unwrap();
         assert!(tools.iter().any(|t| match t {
-            async_openai::types::AssistantTools::Function(f) => f.function.name == "set_screen_brightness",
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "set_screen_brightness",
             _ => false,
         }));
     }
