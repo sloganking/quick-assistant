@@ -139,6 +139,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         let audio_path = audio_rx.recv().unwrap();
+        interrupt_flag.store(false, Ordering::SeqCst);
         let transcription = transcribe::transcribe(&client, &audio_path).await?;
         println!("{}", "You: ".truecolor(0, 255, 0));
         println!("{}", transcription);
