@@ -16,9 +16,9 @@ use open;
 use speakstream::ss::SpeakStream;
 use std::error::Error;
 use std::path::PathBuf;
-use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod record;
@@ -236,7 +236,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     if let Some(text) = &text.text {
                                         if let Some(text) = &text.value {
                                             if !displayed_ai_label {
-                                                print!("{}", "AI: ".truecolor(0, 0, 255));
+                                                println!("{}", "AI: ".truecolor(0, 0, 255));
                                                 displayed_ai_label = true;
                                             }
                                             print!("{}", text);
@@ -303,8 +303,9 @@ fn start_ptt_thread(
                         }
                     } else {
                         println!(
-                            "{}", 
-                            "User recording too short. Aborting transcription and LLM response.".truecolor(255, 0, 0)
+                            "{}",
+                            "User recording too short. Aborting transcription and LLM response."
+                                .truecolor(255, 0, 0)
                         );
                     }
                 }
