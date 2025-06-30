@@ -14,8 +14,8 @@ This document tracks which features from the original assistant have been implem
 | Run internet speed tests | Pending |
 | Set the clipboard contents | Done |
 | Timers with alarm sounds | Pending |
-| Change voice or speaking speed | Pending |
-| Mute/unmute voice output | Pending |
+| Change voice or speaking speed | Done |
+| Mute/unmute voice output | Done |
 | Open OpenAI billing page | Done |
 | Push-to-talk text-to-speech interface | Done |
 | Interrupt AI speech with push-to-talk | Done |
