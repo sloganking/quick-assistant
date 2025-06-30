@@ -9,7 +9,7 @@ This document tracks which features from the original assistant have been implem
 | Media playback commands | Pending |
 | Launch applications from voice | Pending |
 | Display log files | Pending |
-| Get system info | Pending |
+| Get system info | Done |
 | List and kill processes | Pending |
 | Run internet speed tests | Pending |
 | Set the clipboard contents | Done |
