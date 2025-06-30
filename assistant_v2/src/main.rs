@@ -16,6 +16,7 @@ use open;
 use speakstream::ss::SpeakStream;
 use std::error::Error;
 use std::path::PathBuf;
+use std::time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -273,6 +274,7 @@ fn start_ptt_thread(
         let mut key_pressed = false;
         let ptt_key = Key::F9;
         let mut current_path: Option<PathBuf> = None;
+        let mut recording_start = Instant::now();
 
         let callback = move |event: Event| match event.event_type {
             EventType::KeyPress(key) if key == ptt_key && !key_pressed => {
@@ -288,13 +290,22 @@ fn start_ptt_thread(
                 let path = tmp_dir.path().join(format!("{}.wav", Uuid::new_v4()));
                 if recorder.start_recording(&path, None).is_ok() {
                     current_path = Some(path);
+                    recording_start = Instant::now();
                 }
             }
             EventType::KeyRelease(key) if key == ptt_key && key_pressed => {
                 key_pressed = false;
                 if recorder.stop_recording().is_ok() {
-                    if let Some(p) = current_path.take() {
-                        audio_tx.send(p).unwrap();
+                    let elapsed = recording_start.elapsed();
+                    if elapsed.as_secs_f32() >= 0.2 {
+                        if let Some(p) = current_path.take() {
+                            audio_tx.send(p).unwrap();
+                        }
+                    } else {
+                        println!(
+                            "{}", 
+                            "User recording too short. Aborting transcription and LLM response.".truecolor(255, 0, 0)
+                        );
                     }
                 }
                 if duck_ptt {
