@@ -13,6 +13,7 @@ use colored::Colorize;
 use dotenvy::dotenv;
 use futures::StreamExt;
 use open;
+use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss::SpeakStream;
 use std::error::Error;
 use std::path::PathBuf;
@@ -142,6 +143,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     "type": "object",
                     "properties": {"brightness": {"type": "integer"}},
                     "required": ["brightness"],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "media_controls".into(),
+                description: Some("Plays, pauses or seeks media.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "media_button": {
+                            "type": "string",
+                            "enum": [
+                                "MediaStop",
+                                "MediaNextTrack",
+                                "MediaPlayPause",
+                                "MediaPrevTrack",
+                                "VolumeUp",
+                                "VolumeDown",
+                                "VolumeMute"
+                            ]
+                        }
+                    },
+                    "required": ["media_button"]
                 })),
                 strict: None,
             }
@@ -499,6 +524,7 @@ async fn handle_requires_action(
 
     if let Some(required_action) = &run_object.required_action {
         for tool in &required_action.submit_tool_outputs.tool_calls {
+            println!("{}{}", "Invoking function: ".purple(), tool.function.name);
             if tool.function.name == "get_current_temperature" {
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
@@ -545,6 +571,56 @@ async fn handle_requires_action(
                     Ok(_) => "Brightness set".to_string(),
                     Err(e) => format!("Failed to set brightness: {}", e),
                 };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "media_controls" {
+                let button = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                    Ok(v) => v["media_button"].as_str().unwrap_or("").to_string(),
+                    Err(_) => String::new(),
+                };
+
+                let mut enigo = Enigo::new();
+                let msg = match button.as_str() {
+                    "MediaStop" => {
+                        enigo.key_click(enigo::Key::MediaStop);
+                        "MediaStop"
+                    }
+                    "MediaNextTrack" => {
+                        enigo.key_click(enigo::Key::MediaNextTrack);
+                        "MediaNextTrack"
+                    }
+                    "MediaPlayPause" => {
+                        enigo.key_click(enigo::Key::MediaPlayPause);
+                        "MediaPlayPause"
+                    }
+                    "MediaPrevTrack" => {
+                        enigo.key_click(enigo::Key::MediaPrevTrack);
+                        enigo.key_click(enigo::Key::MediaPrevTrack);
+                        "MediaPrevTrack"
+                    }
+                    "VolumeUp" => {
+                        for _ in 0..5 {
+                            enigo.key_click(enigo::Key::VolumeUp);
+                        }
+                        "VolumeUp"
+                    }
+                    "VolumeDown" => {
+                        for _ in 0..5 {
+                            enigo.key_click(enigo::Key::VolumeDown);
+                        }
+                        "VolumeDown"
+                    }
+                    "VolumeMute" => {
+                        enigo.key_click(enigo::Key::VolumeMute);
+                        "VolumeMute"
+                    }
+                    _ => "Unknown button",
+                };
+
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
                     output: Some(msg.into()),
@@ -782,6 +858,46 @@ mod tests {
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) =>
                 f.function.name == "set_speech_speed",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_media_controls_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "media_controls".into(),
+                description: Some("Plays, pauses or seeks media.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "media_button": {
+                            "type": "string",
+                            "enum": [
+                                "MediaStop",
+                                "MediaNextTrack",
+                                "MediaPlayPause",
+                                "MediaPrevTrack",
+                                "VolumeUp",
+                                "VolumeDown",
+                                "VolumeMute"
+                            ]
+                        }
+                    },
+                    "required": ["media_button"]
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "media_controls",
             _ => false,
         }));
     }

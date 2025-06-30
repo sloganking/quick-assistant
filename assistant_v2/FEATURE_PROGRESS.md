@@ -6,7 +6,7 @@ This document tracks which features from the original assistant have been implem
 | --- | --- |
 | Screen brightness control | Done |
 | System volume adjustment (Windows only) | Pending |
-| Media playback commands | Pending |
+| Media playback commands | Done |
 | Launch applications from voice | Pending |
 | Display log files | Pending |
 | Get system info | Done |
@@ -19,5 +19,6 @@ This document tracks which features from the original assistant have been implem
 | Open OpenAI billing page | Done |
 | Push-to-talk text-to-speech interface | Done |
 | Interrupt AI speech with push-to-talk | Done |
+| Log function invocation names | Done |
 
 Update this table as features are migrated and verified to work in `assistant_v2`.
