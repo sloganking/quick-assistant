@@ -44,6 +44,36 @@ struct Opt {
     duck_ptt: bool,
 }
 
+fn parse_voice(name: &str) -> Option<Voice> {
+    match name.to_lowercase().as_str() {
+        "alloy" => Some(Voice::Alloy),
+        "ash" => Some(Voice::Ash),
+        "coral" => Some(Voice::Coral),
+        "echo" => Some(Voice::Echo),
+        "fable" => Some(Voice::Fable),
+        "onyx" => Some(Voice::Onyx),
+        "nova" => Some(Voice::Nova),
+        "sage" => Some(Voice::Sage),
+        "shimmer" => Some(Voice::Shimmer),
+        _ => None,
+    }
+}
+
+fn voice_to_str(voice: &Voice) -> &'static str {
+    match voice {
+        Voice::Alloy => "alloy",
+        Voice::Ash => "ash",
+        Voice::Coral => "coral",
+        Voice::Echo => "echo",
+        Voice::Fable => "fable",
+        Voice::Onyx => "onyx",
+        Voice::Nova => "nova",
+        Voice::Sage => "sage",
+        Voice::Shimmer => "shimmer",
+        _ => "unknown",
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
@@ -130,6 +160,76 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 description: Some(
                     "Opens the OpenAI usage dashboard in the default web browser.".into(),
                 ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "set_speech_speed".into(),
+                description: Some(
+                    "Sets how fast the AI voice speaks. Speed must be between 0.5 and 100.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"speed": {"type": "number"}},
+                    "required": ["speed"],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "get_speech_speed".into(),
+                description: Some("Returns the current AI voice speech speed.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "mute_speech".into(),
+                description: Some("Mutes the AI voice output.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "unmute_speech".into(),
+                description: Some("Unmutes the AI voice output.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "set_voice".into(),
+                description: Some(
+                    "Changes the AI speaking voice. Pass one of: alloy, ash, coral, echo, fable, onyx, nova, sage, shimmer.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"voice": {"type": "string"}},
+                    "required": ["voice"],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "get_voice".into(),
+                description: Some("Returns the name of the current AI voice.".into()),
                 parameters: Some(serde_json::json!({
                     "type": "object",
                     "properties": {},
@@ -382,6 +482,73 @@ async fn handle_requires_action(
                     output: Some(msg.into()),
                 });
             }
+
+            if tool.function.name == "set_speech_speed" {
+                let speed = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                    Ok(v) => v["speed"].as_f64().unwrap_or(1.0) as f32,
+                    Err(_) => 1.0,
+                };
+                let msg = if (0.5..=100.0).contains(&speed) {
+                    speak_stream.lock().unwrap().set_speech_speed(speed);
+                    format!("Speech speed set to {}", speed)
+                } else {
+                    "Speed must be between 0.5 and 100.0".to_string()
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "get_speech_speed" {
+                let speed = speak_stream.lock().unwrap().get_speech_speed();
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(format!("{}", speed).into()),
+                });
+            }
+
+            if tool.function.name == "mute_speech" {
+                speak_stream.lock().unwrap().mute();
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some("AI voice muted".into()),
+                });
+            }
+
+            if tool.function.name == "unmute_speech" {
+                speak_stream.lock().unwrap().unmute();
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some("AI voice unmuted".into()),
+                });
+            }
+
+            if tool.function.name == "set_voice" {
+                let name = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                    Ok(v) => v["voice"].as_str().unwrap_or("").to_string(),
+                    Err(_) => String::new(),
+                };
+                let msg = match parse_voice(&name) {
+                    Some(v) => {
+                        speak_stream.lock().unwrap().set_voice(v);
+                        format!("Voice set to {}", name.to_lowercase())
+                    }
+                    None => "Invalid voice name".to_string(),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "get_voice" {
+                let name = voice_to_str(&speak_stream.lock().unwrap().get_voice());
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(format!("{}", name).into()),
+                });
+            }
         }
 
         if let Err(e) = submit_tool_outputs(client, run_object, tool_outputs, speak_stream).await {
@@ -500,6 +667,59 @@ mod tests {
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) =>
                 f.function.name == "set_screen_brightness",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_set_speech_speed_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "set_speech_speed".into(),
+                description: Some("Sets how fast the AI voice speaks.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"speed": {"type": "number"}},
+                    "required": ["speed"],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "set_speech_speed",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_mute_speech_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "mute_speech".into(),
+                description: Some("Mutes the AI voice output.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) => f.function.name == "mute_speech",
             _ => false,
         }));
     }
