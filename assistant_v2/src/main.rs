@@ -23,7 +23,8 @@ mod transcribe;
 use record::rec;
 use rdev::{listen, Event, EventType, Key};
 use tempfile::tempdir;
-use flume::{Receiver, Sender};
+use flume::Sender;
+use duckduckgo_search::DuckDuckGoSearch;
 use uuid::Uuid;
 use std::thread;
 
@@ -106,6 +107,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     "type": "object",
                     "properties": {"clipboard_text": {"type": "string"}},
                     "required": ["clipboard_text"]
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "internet_search".into(),
+                description: Some("Search the internet for the given query".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
                 })),
                 strict: None,
             }
@@ -284,6 +296,28 @@ async fn handle_requires_action(
                     output: Some(msg.into()),
                 });
             }
+
+            if tool.function.name == "internet_search" {
+                let query = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                    Ok(v) => v["query"].as_str().unwrap_or("").to_string(),
+                    Err(_) => String::new(),
+                };
+                println!("Searching the internet for: {}", query);
+                match internet_search(&query).await {
+                    Ok(results) => {
+                        tool_outputs.push(ToolsOutputs {
+                            tool_call_id: Some(tool.id.clone()),
+                            output: Some(results.into()),
+                        });
+                    }
+                    Err(e) => {
+                        tool_outputs.push(ToolsOutputs {
+                            tool_call_id: Some(tool.id.clone()),
+                            output: Some(format!("Search failed: {}", e).into()),
+                        });
+                    }
+                }
+            }
         }
 
         if let Err(e) = submit_tool_outputs(client, run_object, tool_outputs, speak_stream).await {
@@ -336,6 +370,17 @@ async fn submit_tool_outputs(
     Ok(())
 }
 
+async fn internet_search(query: &str) -> Result<String, Box<dyn Error>> {
+    let search = DuckDuckGoSearch::new();
+    let results = search.search(query).await?;
+    let formatted = results
+        .into_iter()
+        .map(|(text, url)| format!("{} - {}", text, url))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(formatted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,5 +391,11 @@ mod tests {
             .model("gpt-4o")
             .build();
         assert!(req.is_ok());
+    }
+
+    #[tokio::test]
+    async fn search_returns_results() {
+        let res = internet_search("rust programming").await;
+        assert!(res.is_ok());
     }
 }
