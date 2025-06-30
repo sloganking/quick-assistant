@@ -1,19 +1,21 @@
-use std::error::Error;
-
 use async_openai::{
     config::OpenAIConfig,
     types::{
-        AssistantStreamEvent, CreateAssistantRequestArgs, CreateMessageRequest,
-        CreateRunRequest, CreateThreadRequest, FunctionObject, MessageDeltaContent,
-        MessageRole, RunObject, SubmitToolOutputsRunRequest, ToolsOutputs,
+        AssistantStreamEvent, CreateAssistantRequestArgs, CreateMessageRequest, CreateRunRequest,
+        CreateThreadRequest, FunctionObject, MessageDeltaContent, MessageRole, RunObject,
+        SubmitToolOutputsRunRequest, ToolsOutputs,
     },
     Client,
 };
+use dotenvy::dotenv;
 use futures::StreamExt;
+use std::error::Error;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let _ = dotenv();
+
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
@@ -81,7 +83,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .messages(&thread.id)
         .create(CreateMessageRequest {
             role: MessageRole::User,
-            content: "What's the weather in San Francisco today and the likelihood it'll rain?".into(),
+            content: "What's the weather in San Francisco today and the likelihood it'll rain?"
+                .into(),
             ..Default::default()
         })
         .await?;
@@ -202,4 +205,3 @@ mod tests {
         assert!(req.is_ok());
     }
 }
-
