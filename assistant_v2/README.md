@@ -16,3 +16,13 @@ cargo run --manifest-path assistant_v2/Cargo.toml
 ```
 
 The program creates a temporary assistant that answers a simple weather query using function calling.
+
+## Code Interpreter Example
+
+`src/code_interpreter.rs` demonstrates how to use the Assistants API code interpreter tool with a CSV file.
+
+Run it with:
+
+```bash
+cargo run --manifest-path assistant_v2/Cargo.toml --bin code_interpreter
+```

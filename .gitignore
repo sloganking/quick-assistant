@@ -17,4 +17,6 @@ target/
 .env
 *.mp3
 
+output/
+
 logs/
