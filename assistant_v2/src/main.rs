@@ -16,6 +16,7 @@ use clipboard::{ClipboardContext, ClipboardProvider};
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod record;
@@ -128,7 +129,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     )));
 
     let (audio_tx, audio_rx) = flume::unbounded();
-    start_ptt_thread(audio_tx.clone(), speak_stream.clone(), opt.duck_ptt);
+    let interrupt_flag = Arc::new(AtomicBool::new(false));
+    start_ptt_thread(
+        audio_tx.clone(),
+        speak_stream.clone(),
+        opt.duck_ptt,
+        interrupt_flag.clone(),
+    );
 
     loop {
         let audio_path = audio_rx.recv().unwrap();
@@ -162,6 +169,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut displayed_ai_label = false;
 
         while let Some(event) = event_stream.next().await {
+            if interrupt_flag.swap(false, Ordering::SeqCst) {
+                break;
+            }
             match event {
                 Ok(event) => match event {
                     AssistantStreamEvent::ThreadRunRequiresAction(run_object) => {
@@ -204,7 +214,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn start_ptt_thread(audio_tx: Sender<PathBuf>, speak_stream: Arc<Mutex<SpeakStream>>, duck_ptt: bool) {
+fn start_ptt_thread(
+    audio_tx: Sender<PathBuf>,
+    speak_stream: Arc<Mutex<SpeakStream>>,
+    duck_ptt: bool,
+    interrupt_flag: Arc<AtomicBool>,
+) {
     thread::spawn(move || {
         let mut recorder = rec::Recorder::new();
         let tmp_dir = tempdir().unwrap();
@@ -216,8 +231,13 @@ fn start_ptt_thread(audio_tx: Sender<PathBuf>, speak_stream: Arc<Mutex<SpeakStre
             match event.event_type {
                 EventType::KeyPress(key) if key == ptt_key && !key_pressed => {
                     key_pressed = true;
-                    if duck_ptt {
-                        speak_stream.lock().unwrap().start_audio_ducking();
+                    interrupt_flag.store(true, Ordering::SeqCst);
+                    {
+                        let mut ss = speak_stream.lock().unwrap();
+                        ss.stop_speech();
+                        if duck_ptt {
+                            ss.start_audio_ducking();
+                        }
                     }
                     let path = tmp_dir.path().join(format!("{}.wav", Uuid::new_v4()));
                     if recorder.start_recording(&path, None).is_ok() {
