@@ -17,5 +17,6 @@ This document tracks which features from the original assistant have been implem
 | Change voice or speaking speed | Pending |
 | Mute/unmute voice output | Pending |
 | Open OpenAI billing page | Pending |
+| Push-to-talk text-to-speech interface | Done |
 
 Update this table as features are migrated and verified to work in `assistant_v2`.
