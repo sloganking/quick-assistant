@@ -13,6 +13,7 @@ use speakstream::ss::SpeakStream;
 use colored::Colorize;
 use clap::Parser;
 use clipboard::{ClipboardContext, ClipboardProvider};
+use open;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -23,7 +24,7 @@ mod transcribe;
 use record::rec;
 use rdev::{listen, Event, EventType, Key};
 use tempfile::tempdir;
-use flume::{Receiver, Sender};
+use flume::Sender;
 use uuid::Uuid;
 use std::thread;
 
@@ -106,6 +107,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     "type": "object",
                     "properties": {"clipboard_text": {"type": "string"}},
                     "required": ["clipboard_text"]
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "open_openai_billing".into(),
+                description: Some(
+                    "Opens the OpenAI usage dashboard in the default web browser.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
                 })),
                 strict: None,
             }
@@ -284,6 +298,18 @@ async fn handle_requires_action(
                     output: Some(msg.into()),
                 });
             }
+
+            if tool.function.name == "open_openai_billing" {
+                let result = open::that("https://platform.openai.com/usage");
+                let msg = match result {
+                    Ok(_) => "Opened OpenAI billing page".to_string(),
+                    Err(e) => format!("Failed to open OpenAI billing page: {}", e),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
         }
 
         if let Err(e) = submit_tool_outputs(client, run_object, tool_outputs, speak_stream).await {
@@ -346,5 +372,33 @@ mod tests {
             .model("gpt-4o")
             .build();
         assert!(req.is_ok());
+    }
+
+    #[test]
+    fn includes_open_openai_billing_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![
+                FunctionObject {
+                    name: "open_openai_billing".into(),
+                    description: Some("Opens the OpenAI usage dashboard in the default web browser.".into()),
+                    parameters: Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    })),
+                    strict: None,
+                }
+                .into(),
+            ])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) => f.function.name == "open_openai_billing",
+            _ => false,
+        }));
     }
 }
