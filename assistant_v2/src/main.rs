@@ -30,6 +30,7 @@ use record::rec;
 use std::thread;
 use tempfile::tempdir;
 use uuid::Uuid;
+use sysinfo::{Components, Disks, Networks, System};
 
 #[derive(Parser, Debug)]
 struct Opt {
@@ -186,6 +187,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 description: Some(
                     "Opens the OpenAI usage dashboard in the default web browser.".into(),
                 ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "get_system_info".into(),
+                description: Some("Returns system information like CPU and memory usage.".into()),
                 parameters: Some(serde_json::json!({
                     "type": "object",
                     "properties": {},
@@ -447,6 +459,62 @@ fn start_ptt_thread(
     });
 }
 
+fn get_system_info() -> String {
+    let mut info = String::new();
+    let mut sys = System::new_all();
+    sys.refresh_all();
+
+    info.push_str("=> system:\n");
+
+    let total_memory = sys.total_memory();
+    let used_memory = sys.used_memory();
+    let total_swap = sys.total_swap();
+    let used_swap = sys.used_swap();
+
+    info.push_str(&format!("total memory: {} bytes\n", total_memory));
+    info.push_str(&format!("used memory : {} bytes\n", used_memory));
+    info.push_str(&format!("total swap  : {} bytes\n", total_swap));
+    info.push_str(&format!("used swap   : {} bytes\n", used_swap));
+
+    let system_name = System::name();
+    let kernel_version = System::kernel_version();
+    let os_version = System::os_version();
+    let host_name = System::host_name();
+
+    info.push_str(&format!("System name:             {:?}\n", system_name));
+    info.push_str(&format!("System kernel version:   {:?}\n", kernel_version));
+    info.push_str(&format!("System OS version:       {:?}\n", os_version));
+    info.push_str(&format!("System host name:        {:?}\n", host_name));
+
+    let nb_cpus = sys.cpus().len();
+    info.push_str(&format!("NB CPUs: {}\n", nb_cpus));
+
+    info.push_str("=> disks:\n");
+    let disks = Disks::new_with_refreshed_list();
+    for disk in &disks {
+        info.push_str(&format!("{:?}\n", disk));
+    }
+
+    info.push_str("=> networks:\n");
+    let networks = Networks::new_with_refreshed_list();
+    for (interface_name, data) in &networks {
+        info.push_str(&format!(
+            "{}: {} B (down) / {} B (up)\n",
+            interface_name,
+            data.total_received(),
+            data.total_transmitted(),
+        ));
+    }
+
+    info.push_str("=> components:\n");
+    let components = Components::new_with_refreshed_list();
+    for component in &components {
+        info.push_str(&format!("{:?}\n", component));
+    }
+
+    info
+}
+
 async fn handle_requires_action(
     client: Client<OpenAIConfig>,
     run_object: RunObject,
@@ -627,6 +695,14 @@ async fn handle_requires_action(
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
                     output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "get_system_info" {
+                let info = get_system_info();
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(info.into()),
                 });
             }
 
@@ -848,6 +924,32 @@ mod tests {
         let tools = req.tools.unwrap();
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) => f.function.name == "mute_speech",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_get_system_info_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "get_system_info".into(),
+                description: Some("Returns system information like CPU and memory usage.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) => f.function.name == "get_system_info",
             _ => false,
         }));
     }
