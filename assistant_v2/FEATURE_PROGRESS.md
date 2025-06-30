@@ -4,7 +4,7 @@ This document tracks which features from the original assistant have been implem
 
 | Feature | Status |
 | --- | --- |
-| Screen brightness control | Pending |
+| Screen brightness control | Done |
 | System volume adjustment (Windows only) | Pending |
 | Media playback commands | Pending |
 | Launch applications from voice | Pending |
