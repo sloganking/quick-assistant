@@ -21,7 +21,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 
 mod record;
 mod transcribe;
-use flume::{Receiver, Sender};
+use flume::Sender;
 use rdev::{listen, Event, EventType, Key};
 use record::rec;
 use std::thread;
@@ -177,7 +177,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 break;
             }
             match event {
-                Ok(event) => match event {
+                Ok(evt) => match &evt {
                     AssistantStreamEvent::ThreadRunCreated(obj)
                     | AssistantStreamEvent::ThreadRunQueued(obj)
                     | AssistantStreamEvent::ThreadRunInProgress(obj)
@@ -191,20 +191,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         if run_id.is_none() {
                             run_id = Some(obj.id.clone());
                         }
-                        if matches!(event, AssistantStreamEvent::ThreadRunRequiresAction(_)) {
+                        if matches!(evt, AssistantStreamEvent::ThreadRunRequiresAction(_)) {
                             let client = client_cloned.clone();
                             let speak_stream = speak_stream_cloned.clone();
+                            let run_obj = obj.clone();
                             task_handle = Some(tokio::spawn(async move {
-                                handle_requires_action(client, obj, speak_stream).await
+                                handle_requires_action(client, run_obj, speak_stream).await
                             }));
                         }
                     }
                     AssistantStreamEvent::ThreadMessageDelta(delta) => {
-                        if let Some(contents) = delta.delta.content {
+                        if let Some(contents) = &delta.delta.content {
                             for content in contents {
                                 if let MessageDeltaContent::Text(text) = content {
-                                    if let Some(text) = text.text {
-                                        if let Some(text) = text.value {
+                                    if let Some(text) = &text.text {
+                                        if let Some(text) = &text.value {
                                             if !displayed_ai_label {
                                                 print!("{}", "AI: ".truecolor(0, 0, 255));
                                                 displayed_ai_label = true;
