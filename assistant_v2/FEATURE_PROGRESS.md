@@ -12,7 +12,7 @@ This document tracks which features from the original assistant have been implem
 | Get system info | Pending |
 | List and kill processes | Pending |
 | Run internet speed tests | Pending |
-| Set the clipboard contents | Pending |
+| Set the clipboard contents | Done |
 | Timers with alarm sounds | Pending |
 | Change voice or speaking speed | Pending |
 | Mute/unmute voice output | Pending |

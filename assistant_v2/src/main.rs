@@ -10,6 +10,9 @@ use async_openai::{
 use dotenvy::dotenv;
 use futures::StreamExt;
 use speakstream::ss::SpeakStream;
+use colored::Colorize;
+use clap::Parser;
+use clipboard::{ClipboardContext, ClipboardProvider};
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -24,8 +27,24 @@ use flume::{Receiver, Sender};
 use uuid::Uuid;
 use std::thread;
 
+#[derive(Parser, Debug)]
+struct Opt {
+    /// How fast the AI speaks. 1.0 is normal speed.
+    #[arg(long, default_value_t = 1.0)]
+    speech_speed: f32,
+
+    /// Enable ticking sound while speaking.
+    #[arg(long, default_value_t = false)]
+    tick: bool,
+
+    /// Enable audio ducking while the push-to-talk key is held.
+    #[arg(long, default_value_t = false)]
+    duck_ptt: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let opt = Opt::parse();
     let _ = dotenv();
 
     tracing_subscriber::registry()
@@ -80,6 +99,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 strict: None,
             }
             .into(),
+            FunctionObject {
+                name: "set_clipboard".into(),
+                description: Some("Sets the clipboard to the given text.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"clipboard_text": {"type": "string"}},
+                    "required": ["clipboard_text"]
+                })),
+                strict: None,
+            }
+            .into(),
         ])
         .build()?;
 
@@ -90,15 +120,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .create(CreateThreadRequest::default())
         .await?;
 
-    let speak_stream = Arc::new(Mutex::new(SpeakStream::new(Voice::Echo, 1.0, true, true)));
+    let speak_stream = Arc::new(Mutex::new(SpeakStream::new(
+        Voice::Echo,
+        opt.speech_speed,
+        opt.tick,
+        opt.duck_ptt,
+    )));
 
     let (audio_tx, audio_rx) = flume::unbounded();
-    start_ptt_thread(audio_tx.clone());
+    start_ptt_thread(audio_tx.clone(), speak_stream.clone(), opt.duck_ptt);
 
     loop {
         let audio_path = audio_rx.recv().unwrap();
         let transcription = transcribe::transcribe(&client, &audio_path).await?;
-        println!("You: {}", transcription);
+        println!("{}", "You: ".truecolor(0, 255, 0));
+        println!("{}", transcription);
 
         client
             .threads()
@@ -123,6 +159,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let speak_stream_cloned = speak_stream.clone();
         let client_cloned = client.clone();
         let mut task_handle = None;
+        let mut displayed_ai_label = false;
 
         while let Some(event) = event_stream.next().await {
             match event {
@@ -140,6 +177,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if let MessageDeltaContent::Text(text) = content {
                                     if let Some(text) = text.text {
                                         if let Some(text) = text.value {
+                                            if !displayed_ai_label {
+                                                print!("{}", "AI: ".truecolor(0, 0, 255));
+                                                displayed_ai_label = true;
+                                            }
                                             print!("{}", text);
                                             speak_stream_cloned.lock().unwrap().add_token(&text);
                                         }
@@ -163,7 +204,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn start_ptt_thread(audio_tx: Sender<PathBuf>) {
+fn start_ptt_thread(audio_tx: Sender<PathBuf>, speak_stream: Arc<Mutex<SpeakStream>>, duck_ptt: bool) {
     thread::spawn(move || {
         let mut recorder = rec::Recorder::new();
         let tmp_dir = tempdir().unwrap();
@@ -175,6 +216,9 @@ fn start_ptt_thread(audio_tx: Sender<PathBuf>) {
             match event.event_type {
                 EventType::KeyPress(key) if key == ptt_key && !key_pressed => {
                     key_pressed = true;
+                    if duck_ptt {
+                        speak_stream.lock().unwrap().start_audio_ducking();
+                    }
                     let path = tmp_dir.path().join(format!("{}.wav", Uuid::new_v4()));
                     if recorder.start_recording(&path, None).is_ok() {
                         current_path = Some(path);
@@ -186,6 +230,9 @@ fn start_ptt_thread(audio_tx: Sender<PathBuf>) {
                         if let Some(p) = current_path.take() {
                             audio_tx.send(p).unwrap();
                         }
+                    }
+                    if duck_ptt {
+                        speak_stream.lock().unwrap().stop_audio_ducking();
                     }
                 }
                 _ => {}
@@ -218,6 +265,23 @@ async fn handle_requires_action(
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
                     output: Some("0.06".into()),
+                });
+            }
+
+            if tool.function.name == "set_clipboard" {
+                let mut clipboard: ClipboardContext = ClipboardProvider::new().unwrap();
+                let text = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                    Ok(v) => v["clipboard_text"].as_str().unwrap_or("").to_string(),
+                    Err(_) => String::new(),
+                };
+                let result = clipboard.set_contents(text.clone());
+                let msg = match result {
+                    Ok(_) => "Clipboard set".to_string(),
+                    Err(e) => format!("Failed to set clipboard: {}", e),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
                 });
             }
         }
