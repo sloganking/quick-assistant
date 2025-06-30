@@ -8,6 +8,7 @@ use async_openai::{
     Client,
 };
 use clap::Parser;
+use easy_rdev_key::PTTKey;
 use clipboard::{ClipboardContext, ClipboardProvider};
 use colored::Colorize;
 use dotenvy::dotenv;
@@ -32,6 +33,17 @@ use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 struct Opt {
+    /// The push-to-talk key used to activate the microphone.
+    #[arg(long)]
+    ptt_key: Option<PTTKey>,
+
+    /// The push-to-talk key as a special keycode.
+    /// Use this if you want to use a key that is not supported by the `PTTKey` enum.
+    /// You can find out what number to pass for your key by running the `ShowKeyPresses` subcommand.
+    /// This option conflicts with `--ptt-key`.
+    #[arg(long, conflicts_with = "ptt_key")]
+    special_ptt_key: Option<u32>,
+
     /// How fast the AI speaks. 1.0 is normal speed.
     #[arg(long, default_value_t = 1.0)]
     speech_speed: f32,
@@ -158,11 +170,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (audio_tx, audio_rx) = flume::unbounded();
     let interrupt_flag = Arc::new(AtomicBool::new(false));
+    let ptt_key = match opt.ptt_key {
+        Some(k) => k.into(),
+        None => match opt.special_ptt_key {
+            Some(code) => Key::Unknown(code),
+            None => {
+                println!(
+                    "No push to talk key specified. Please pass a key using the --ptt-key argument or the --special-ptt-key argument."
+                );
+                return Ok(());
+            }
+        },
+    };
     start_ptt_thread(
         audio_tx.clone(),
         speak_stream.clone(),
         opt.duck_ptt,
         interrupt_flag.clone(),
+        ptt_key,
     );
 
     loop {
@@ -267,12 +292,12 @@ fn start_ptt_thread(
     speak_stream: Arc<Mutex<SpeakStream>>,
     duck_ptt: bool,
     interrupt_flag: Arc<AtomicBool>,
+    ptt_key: Key,
 ) {
     thread::spawn(move || {
         let mut recorder = rec::Recorder::new();
         let tmp_dir = tempdir().unwrap();
         let mut key_pressed = false;
-        let ptt_key = Key::F9;
         let mut current_path: Option<PathBuf> = None;
         let mut recording_start = Instant::now();
 
@@ -514,5 +539,11 @@ mod tests {
                 f.function.name == "set_screen_brightness",
             _ => false,
         }));
+    }
+
+    #[test]
+    fn parses_ptt_key_flag() {
+        let opt = Opt::try_parse_from(["test", "--ptt-key", "f9"]).unwrap();
+        assert!(matches!(opt.ptt_key, Some(PTTKey::F9)));
     }
 }
