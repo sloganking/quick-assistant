@@ -42,6 +42,10 @@ struct Opt {
     #[arg(long, default_value_t = false)]
     tick: bool,
 
+    /// Enable audio ducking while the assistant is speaking.
+    #[arg(long, default_value_t = false)]
+    duck: bool,
+
     /// Enable audio ducking while the push-to-talk key is held.
     #[arg(long, default_value_t = false)]
     duck_ptt: bool,
@@ -290,7 +294,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Voice::Echo,
         opt.speech_speed,
         opt.tick,
-        opt.duck_ptt,
+        opt.duck,
     )));
 
     let (audio_tx, audio_rx) = flume::unbounded();
