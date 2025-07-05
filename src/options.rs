@@ -32,6 +32,10 @@ pub struct Opt {
     #[arg(long)]
     pub tick: bool,
 
+    /// Duck other application audio while the assistant is speaking.
+    #[arg(long)]
+    pub duck: bool,
+
     /// Duck other application audio while the push-to-talk key is held down.
     #[arg(long)]
     pub duck_ptt: bool,
