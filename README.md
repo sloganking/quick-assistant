@@ -27,6 +27,7 @@ https://github.com/sloganking/quick-assistant/assets/16965931/a0c7469a-2c64-46e5
 - 🗑️ **List and kill processes** by voice
 - 🌐 **Run internet speed tests**
 - 📋 **Set the clipboard** contents
+- 🔳 **Copy text as a QR code image** to the clipboard
 - ⏱️ **Timers** with alarm sounds
 - 🎙️ **Change voice** or speaking speed on the fly
 - 🔕 **Mute/unmute** the voice output
