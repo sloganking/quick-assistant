@@ -187,6 +187,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             .into(),
             FunctionObject {
+                name: "get_clipboard".into(),
+                description: Some("Returns the current clipboard text.".into()),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
                 name: "open_openai_billing".into(),
                 description: Some(
                     "Opens the OpenAI usage dashboard in the default web browser.".into(),
@@ -519,6 +530,14 @@ fn get_system_info() -> String {
     info
 }
 
+fn get_clipboard_string() -> Result<String, String> {
+    let mut clipboard: ClipboardContext = ClipboardProvider::new()
+        .map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
+    clipboard
+        .get_contents()
+        .map_err(|e| format!("Failed to read clipboard contents: {}", e))
+}
+
 async fn handle_requires_action(
     client: Client<OpenAIConfig>,
     run_object: RunObject,
@@ -554,6 +573,17 @@ async fn handle_requires_action(
                 let msg = match result {
                     Ok(_) => "Clipboard set".to_string(),
                     Err(e) => format!("Failed to set clipboard: {}", e),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "get_clipboard" {
+                let msg = match get_clipboard_string() {
+                    Ok(text) => text,
+                    Err(e) => e,
                 };
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
@@ -956,5 +986,20 @@ mod tests {
             async_openai::types::AssistantTools::Function(f) => f.function.name == "get_system_info",
             _ => false,
         }));
+    }
+
+    #[test]
+    fn get_clipboard_returns_contents() {
+        let mut clipboard: ClipboardContext = match ClipboardProvider::new() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        if clipboard.set_contents("clipboard_test".to_string()).is_err() {
+            return;
+        }
+        match get_clipboard_string() {
+            Ok(contents) => assert_eq!(contents, "clipboard_test"),
+            Err(_) => {}
+        }
     }
 }
