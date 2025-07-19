@@ -185,6 +185,21 @@ mod tests {
         assert_eq!(img.height, 128);
         assert_eq!(img.bytes.len(), 128 * 128 * 4);
     }
+
+    #[test]
+    fn clipboard_roundtrip() {
+        let mut clipboard: ClipboardContext = match ClipboardProvider::new() {
+            Ok(c) => c,
+            Err(_) => return, // clipboard not available
+        };
+        if clipboard.set_contents("test123".to_string()).is_err() {
+            return;
+        }
+        match get_clipboard_string() {
+            Ok(contents) => assert_eq!(contents, "test123"),
+            Err(_) => {}
+        }
+    }
 }
 
 /// Creates a temporary file from a byte slice and returns the path to the file.
@@ -574,6 +589,13 @@ fn call_fn(
             match clipboard.set_contents(clipboard_text.to_string()) {
                 Ok(_) => Some("Clipboard set successfully.".to_string()),
                 Err(e) => Some(format!("Failed to set clipboard contents: {}", e)),
+            }
+        }
+
+        "get_clipboard" => {
+            match get_clipboard_string() {
+                Ok(text) => Some(text),
+                Err(e) => Some(e),
             }
         }
 
@@ -983,6 +1005,14 @@ fn qr_to_clipboard(text: &str) -> Result<(), String> {
     clipboard
         .set_image(img)
         .map_err(|e| format!("Failed to set clipboard image: {}", e))
+}
+
+fn get_clipboard_string() -> Result<String, String> {
+    let mut clipboard: ClipboardContext = ClipboardProvider::new()
+        .map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
+    clipboard
+        .get_contents()
+        .map_err(|e| format!("Failed to read clipboard contents: {}", e))
 }
 
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
@@ -1588,6 +1618,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             "clipboard_text": { "type": "string" },
                                         },
                                         "required": ["clipboard_text"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("get_clipboard")
+                                    .description("Returns the current clipboard text.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
                                     }))
                                     .build().unwrap(),
 
