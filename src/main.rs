@@ -1,11 +1,14 @@
 use anyhow::Context;
+use arboard::{Clipboard as ImageClipboard, ImageData};
 use async_openai::types::{
     ChatCompletionFunctionsArgs, ChatCompletionRequestFunctionMessageArgs,
     ChatCompletionRequestToolMessageArgs, FinishReason,
 };
 use clipboard::{ClipboardContext, ClipboardProvider};
 use dotenvy::dotenv;
+use qrcode_generator::{to_image_from_str, QrCodeEcc};
 use serde_json::json;
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{stdout, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -173,6 +176,14 @@ mod tests {
             assert_eq!(voice_to_str(&voice), name.to_lowercase());
         }
         assert!(parse_voice("doesnotexist").is_none());
+    }
+
+    #[test]
+    fn qr_image_data_size() {
+        let img = qr_image_data("hello", 128).expect("image generation");
+        assert_eq!(img.width, 128);
+        assert_eq!(img.height, 128);
+        assert_eq!(img.bytes.len(), 128 * 128 * 4);
     }
 }
 
@@ -566,6 +577,23 @@ fn call_fn(
             }
         }
 
+        "qr_to_clipboard" => {
+            let args = match serde_json::from_str::<serde_json::Value>(fn_args) {
+                Ok(json) => json,
+                Err(e) => return Some(format!("Failed to parse arguments: {}", e)),
+            };
+
+            let text = match args["text"].as_str() {
+                Some(t) => t,
+                None => return Some("Missing 'text' argument.".to_string()),
+            };
+
+            match qr_to_clipboard(text) {
+                Ok(_) => Some("QR code copied to clipboard.".to_string()),
+                Err(e) => Some(format!("Failed to create QR code: {}", e)),
+            }
+        }
+
         "set_speech_speed" => {
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             if let Some(speed) = args["speed"].as_f64() {
@@ -932,6 +960,29 @@ fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
         Ok(_) => Ok("Successfully opened file in powershell".to_string()),
         Err(err) => Err(format!("Failed to open file in powershell: {:?}", err)),
     }
+}
+
+fn qr_image_data(text: &str, size: usize) -> Result<ImageData<'static>, String> {
+    let raw = to_image_from_str(text, QrCodeEcc::Low, size).map_err(|e| format!("{}", e))?;
+    let mut rgba = Vec::with_capacity(raw.len() * 4);
+    for b in raw {
+        let v = if b == 0 { 0 } else { 255 };
+        rgba.extend_from_slice(&[v, v, v, 255]);
+    }
+    Ok(ImageData {
+        width: size,
+        height: size,
+        bytes: Cow::Owned(rgba),
+    })
+}
+
+fn qr_to_clipboard(text: &str) -> Result<(), String> {
+    let img = qr_image_data(text, 256)?;
+    let mut clipboard =
+        ImageClipboard::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
+    clipboard
+        .set_image(img)
+        .map_err(|e| format!("Failed to set clipboard image: {}", e))
 }
 
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
@@ -1537,6 +1588,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             "clipboard_text": { "type": "string" },
                                         },
                                         "required": ["clipboard_text"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("qr_to_clipboard")
+                                    .description("Copies a QR code image for the given text to the clipboard.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": { "text": { "type": "string" } },
+                                        "required": ["text"],
                                     }))
                                     .build().unwrap(),
 
