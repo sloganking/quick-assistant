@@ -21,5 +21,6 @@ This document tracks which features from the original assistant have been implem
 | Push-to-talk text-to-speech interface | Done |
 | Interrupt AI speech with push-to-talk | Done |
 | Log function invocation names | Done |
+| Handle empty transcription results | Done |
 
 Update this table as features are migrated and verified to work in `assistant_v2`.

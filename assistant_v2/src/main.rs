@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing::info;
 
 mod record;
 mod transcribe;
@@ -334,6 +335,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let audio_path = audio_rx.recv().unwrap();
         interrupt_flag.store(false, Ordering::SeqCst);
         let transcription = transcribe::transcribe(&client, &audio_path).await?;
+        if transcription.trim().is_empty() {
+            println!("No transcription");
+            info!("User transcription was empty. Aborting LLM response.");
+            continue;
+        }
         println!("{}", "You: ".truecolor(0, 255, 0));
         println!("{}", transcription);
 
