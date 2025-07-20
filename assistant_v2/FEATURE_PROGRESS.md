@@ -11,7 +11,7 @@ This document tracks which features from the original assistant have been implem
 | Display log files | Pending |
 | Get system info | Done |
 | List and kill processes | Pending |
-| Run internet speed tests | Done |
+| Run internet speed tests | Done (async) |
 | Set the clipboard contents | Done |
 | Get the clipboard contents | Done |
 | Timers with alarm sounds | Pending |

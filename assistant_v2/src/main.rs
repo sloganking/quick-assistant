@@ -704,13 +704,78 @@ async fn handle_requires_action(
             }
 
             if tool.function.name == "speedtest" {
-                let msg = match speedtest() {
-                    Ok(out) => out,
-                    Err(e) => e,
-                };
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
-                    output: Some(msg.into()),
+                    output: Some(
+                        "Speed test has been successfully started. It takes several seconds. The results will be shared once the speedtest is complete.".into(),
+                    ),
+                });
+
+                let client = client.clone();
+                let thread_id = run_object.thread_id.clone();
+                let assistant_id = run_object.assistant_id.clone();
+                let speak_stream = speak_stream.clone();
+                tokio::spawn(async move {
+                    let result = match speedtest() {
+                        Ok(out) => format!("Speedtest results: {}", out),
+                        Err(e) => format!("Speedtest failed with error: {}", e),
+                    };
+
+                    if let Err(e) = client
+                        .threads()
+                        .messages(&thread_id)
+                        .create(CreateMessageRequest {
+                            role: MessageRole::User,
+                            content: result.clone().into(),
+                            ..Default::default()
+                        })
+                        .await
+                    {
+                        eprintln!("Failed to send speedtest results: {e}");
+                        return;
+                    }
+
+                    let mut event_stream = match client
+                        .threads()
+                        .runs(&thread_id)
+                        .create_stream(CreateRunRequest {
+                            assistant_id: assistant_id.unwrap_or_default(),
+                            stream: Some(true),
+                            ..Default::default()
+                        })
+                        .await
+                    {
+                        Ok(es) => es,
+                        Err(e) => {
+                            eprintln!("Failed to create run for speedtest results: {e}");
+                            return;
+                        }
+                    };
+
+                    let mut displayed_ai_label = false;
+                    while let Some(event) = event_stream.next().await {
+                        if let Ok(AssistantStreamEvent::ThreadMessageDelta(delta)) = event {
+                            if let Some(contents) = &delta.delta.content {
+                                for content in contents {
+                                    if let MessageDeltaContent::Text(text) = content {
+                                        if let Some(text) = &text.text {
+                                            if let Some(text) = &text.value {
+                                                if !displayed_ai_label {
+                                                    println!("{}", "AI: ".truecolor(0, 0, 255));
+                                                    displayed_ai_label = true;
+                                                }
+                                                print!("{}", text);
+                                                speak_stream.lock().unwrap().add_token(text);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    speak_stream.lock().unwrap().complete_sentence();
+                    println!();
                 });
             }
 
