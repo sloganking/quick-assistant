@@ -16,7 +16,9 @@ use open;
 use enigo::{Enigo, KeyboardControllable};
 use speakstream::ss::SpeakStream;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::LazyLock;
@@ -237,6 +239,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 name: "open_logs_folder".into(),
                 description: Some(
                     "Opens the logs folder in the default file browser.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "show_live_log_stream".into(),
+                description: Some(
+                    "Shows live updates of the log file via opening powershell and running 'Get-Content -Wait'.".into(),
                 ),
                 parameters: Some(serde_json::json!({
                     "type": "object",
@@ -597,6 +612,32 @@ fn speedtest() -> Result<String, String> {
     Ok(output)
 }
 
+fn get_currently_active_log_file() -> Option<PathBuf> {
+    let mut entries: Vec<_> = fs::read_dir(&*LOGS_DIR).ok()?.filter_map(Result::ok).collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    entries.last().map(|last| last.path())
+}
+
+fn run_get_content_wait_on_file(file_path: &Path) -> Result<String, String> {
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| "Failed to convert file path to string".to_string())?;
+    Command::new("cmd")
+        .args([
+            "/C",
+            "start",
+            "powershell",
+            "-NoExit",
+            "-Command",
+            "Get-Content",
+            &format!("\"{}\"", file_path_str),
+            "-Wait",
+        ])
+        .spawn()
+        .map(|_| "Successfully opened file in powershell".to_string())
+        .map_err(|err| format!("Failed to open file in powershell: {:?}", err))
+}
+
 async fn handle_requires_action(
     client: Client<OpenAIConfig>,
     run_object: RunObject,
@@ -738,6 +779,20 @@ async fn handle_requires_action(
                 let msg = match result {
                     Ok(_) => format!("Opened logs folder: {}", LOGS_DIR.display()),
                     Err(e) => format!("Failed to open logs folder: {}", e),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "show_live_log_stream" {
+                let msg = match get_currently_active_log_file() {
+                    Some(log_file) => match run_get_content_wait_on_file(&log_file) {
+                        Ok(m) => m,
+                        Err(e) => e,
+                    },
+                    None => "No log files found".to_string(),
                 };
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
@@ -1015,6 +1070,35 @@ mod tests {
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) =>
                 f.function.name == "open_logs_folder",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_show_live_log_stream_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "show_live_log_stream".into(),
+                description: Some(
+                    "Shows live updates of the log file via opening powershell and running 'Get-Content -Wait'.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "show_live_log_stream",
             _ => false,
         }));
     }
