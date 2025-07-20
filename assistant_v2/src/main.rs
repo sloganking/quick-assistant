@@ -19,6 +19,7 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::LazyLock;
 use std::time::Instant;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use tracing::info;
@@ -32,6 +33,13 @@ use std::thread;
 use tempfile::tempdir;
 use uuid::Uuid;
 use sysinfo::{Components, Disks, Networks, System};
+
+static LOGS_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    dirs::cache_dir()
+        .unwrap()
+        .join("quick-assistant")
+        .join("logs")
+});
 
 #[derive(Parser, Debug)]
 struct Opt {
@@ -215,6 +223,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 name: "open_openai_billing".into(),
                 description: Some(
                     "Opens the OpenAI usage dashboard in the default web browser.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "open_logs_folder".into(),
+                description: Some(
+                    "Opens the logs folder in the default file browser.".into(),
                 ),
                 parameters: Some(serde_json::json!({
                     "type": "object",
@@ -709,6 +730,19 @@ async fn handle_requires_action(
                 });
             }
 
+            if tool.function.name == "open_logs_folder" {
+                let _ = std::fs::create_dir_all(&*LOGS_DIR);
+                let result = open::that(&*LOGS_DIR);
+                let msg = match result {
+                    Ok(_) => format!("Opened logs folder: {}", LOGS_DIR.display()),
+                    Err(e) => format!("Failed to open logs folder: {}", e),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
             if tool.function.name == "speedtest" {
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
@@ -948,6 +982,35 @@ mod tests {
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) =>
                 f.function.name == "open_openai_billing",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_open_logs_folder_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "open_logs_folder".into(),
+                description: Some(
+                    "Opens the logs folder in the default file browser.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "open_logs_folder",
             _ => false,
         }));
     }

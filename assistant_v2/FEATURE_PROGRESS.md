@@ -8,7 +8,7 @@ This document tracks which features from the original assistant have been implem
 | System volume adjustment (Windows only) | Pending |
 | Media playback commands | Done |
 | Launch applications from voice | Pending |
-| Display log files | Pending |
+| Display log files | Done |
 | Get system info | Done |
 | List and kill processes | Pending |
 | Run internet speed tests | Done (async) |
