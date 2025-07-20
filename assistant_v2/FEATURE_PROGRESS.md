@@ -10,7 +10,7 @@ This document tracks which features from the original assistant have been implem
 | Launch applications from voice | Pending |
 | Display log files | Pending |
 | Get system info | Pending |
-| List and kill processes | Pending |
+| List and kill processes | Done |
 | Run internet speed tests | Pending |
 | Set the clipboard contents | Done |
 | Timers with alarm sounds | Pending |

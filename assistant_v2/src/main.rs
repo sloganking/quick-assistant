@@ -10,6 +10,8 @@ use async_openai::{
 use clap::Parser;
 use clipboard::{ClipboardContext, ClipboardProvider};
 use colored::Colorize;
+use sysinfo::System;
+use tracing::debug;
 use dotenvy::dotenv;
 use futures::StreamExt;
 use open;
@@ -235,6 +237,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     "type": "object",
                     "properties": {},
                     "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "get_system_processes".into(),
+                description: Some(
+                    "Returns information about running system processes.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
+                name: "kill_processes_with_name".into(),
+                description: Some(
+                    "Kills all processes with a given name. ALWAYS call \"get_system_processes\" first to get the name of the process you want to kill.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"process_name": {"type": "string"}},
+                    "required": ["process_name"],
                 })),
                 strict: None,
             }
@@ -561,6 +589,30 @@ async fn handle_requires_action(
                     output: Some(format!("{}", name).into()),
                 });
             }
+
+            if tool.function.name == "get_system_processes" {
+                let output = get_system_processes();
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(output.into()),
+                });
+            }
+
+            if tool.function.name == "kill_processes_with_name" {
+                let name = match serde_json::from_str::<serde_json::Value>(&tool.function.arguments) {
+                    Ok(v) => v["process_name"].as_str().unwrap_or("").to_string(),
+                    Err(_) => String::new(),
+                };
+                let result = kill_processes_with_name(&name);
+                let msg = match result {
+                    Some(_) => format!("Killed all processes with name: \"{}\"", name),
+                    None => format!("Failed to kill all processes with name: {}", name),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
         }
 
         if let Err(e) = submit_tool_outputs(client, run_object, tool_outputs, speak_stream).await {
@@ -611,6 +663,68 @@ async fn submit_tool_outputs(
 
     speak_stream.lock().unwrap().complete_sentence();
     Ok(())
+}
+
+fn get_system_processes() -> String {
+    let mut info = String::new();
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    info.push_str("=> processes:\n");
+    for (pid, process) in sys.processes() {
+        let path_string = match process.exe() {
+            Some(path) => path.to_string_lossy().to_string(),
+            None => "Unknown".to_string(),
+        };
+        info.push_str(&format!(
+            "[{}] {:?} start_time: {:?} runtime: {} status: {} cpu_usage: {} directory: {}\n",
+            pid,
+            process.name(),
+            process.start_time(),
+            process.run_time(),
+            process.status(),
+            process.cpu_usage(),
+            path_string,
+        ));
+    }
+    info
+}
+
+fn get_process_names() -> Vec<String> {
+    let sys = System::new_all();
+    let mut process_names = Vec::new();
+    for process in sys.processes().values() {
+        let process_name = process.name().to_string_lossy().to_string();
+        if !process_names.contains(&process_name) {
+            process_names.push(process_name);
+        }
+    }
+    process_names
+}
+
+fn kill_processes_with_name(process_name: &str) -> Option<()> {
+    let mut sys = System::new_all();
+    for (pid, process) in sys.processes() {
+        if process.name().to_string_lossy() == process_name {
+            if process.kill() {
+                debug!(
+                    "Killed process with name: \"{}\" and PID: {}",
+                    process_name, pid
+                );
+            } else {
+                debug!(
+                    "[Potentially] killed process with name: \"{}\" and PID: {}",
+                    process_name, pid
+                );
+            }
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    sys.refresh_all();
+    if get_process_names().contains(&process_name.to_string()) {
+        None
+    } else {
+        Some(())
+    }
 }
 
 #[cfg(test)]
@@ -732,6 +846,64 @@ mod tests {
         let tools = req.tools.unwrap();
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) => f.function.name == "mute_speech",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_get_system_processes_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "get_system_processes".into(),
+                description: Some(
+                    "Returns information about running system processes.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "get_system_processes",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_kill_processes_with_name_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "kill_processes_with_name".into(),
+                description: Some(
+                    "Kills all processes with a given name. ALWAYS call \"get_system_processes\" first to get the name of the process you want to kill.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {"process_name": {"type": "string"}},
+                    "required": ["process_name"],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) =>
+                f.function.name == "kill_processes_with_name",
             _ => false,
         }));
     }
