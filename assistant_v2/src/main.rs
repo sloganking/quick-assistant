@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use std::io::{stdout, Write};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use tracing::info;
 
@@ -411,6 +412,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 displayed_ai_label = true;
                                             }
                                             print!("{}", text);
+                                            stdout().flush().unwrap();
                                             speak_stream_cloned.lock().unwrap().add_token(&text);
                                         }
                                     }
@@ -771,6 +773,7 @@ async fn handle_requires_action(
                                                     displayed_ai_label = true;
                                                 }
                                                 print!("{}", text);
+                                                stdout().flush().unwrap();
                                                 speak_stream.lock().unwrap().add_token(text);
                                             }
                                         }
@@ -895,6 +898,7 @@ async fn submit_tool_outputs(
                                 if let Some(text) = text.text {
                                     if let Some(text) = text.value {
                                         print!("{}", text);
+                                        stdout().flush().unwrap();
                                         speak_stream.lock().unwrap().add_token(&text);
                                     }
                                 }
