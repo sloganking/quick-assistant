@@ -139,6 +139,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
             .into(),
             FunctionObject {
+                name: "speedtest".into(),
+                description: Some(
+                    "Runs an internet speedtest and returns the results.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into(),
+            FunctionObject {
                 name: "set_screen_brightness".into(),
                 description: Some(
                     "Sets the screen brightness from 0 to 100 using the `luster` utility.".into(),
@@ -538,6 +551,23 @@ fn get_clipboard_string() -> Result<String, String> {
         .map_err(|e| format!("Failed to read clipboard contents: {}", e))
 }
 
+fn speedtest() -> Result<String, String> {
+    let output = match std::process::Command::new("speedtest-rs").output() {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                return Err(
+                    "speedtest-rs not found. Please install speedtest-rs and add it to your PATH. You can do this by running `cargo install speedtest-rs`".to_string(),
+                );
+            } else {
+                return Err(format!("Failed to run speedtest-rs: {:?}", err));
+            }
+        }
+    };
+
+    Ok(output)
+}
+
 async fn handle_requires_action(
     client: Client<OpenAIConfig>,
     run_object: RunObject,
@@ -666,6 +696,17 @@ async fn handle_requires_action(
                 let msg = match result {
                     Ok(_) => "Opened OpenAI billing page".to_string(),
                     Err(e) => format!("Failed to open OpenAI billing page: {}", e),
+                };
+                tool_outputs.push(ToolsOutputs {
+                    tool_call_id: Some(tool.id.clone()),
+                    output: Some(msg.into()),
+                });
+            }
+
+            if tool.function.name == "speedtest" {
+                let msg = match speedtest() {
+                    Ok(out) => out,
+                    Err(e) => e,
                 };
                 tool_outputs.push(ToolsOutputs {
                     tool_call_id: Some(tool.id.clone()),
@@ -836,6 +877,34 @@ mod tests {
         assert!(tools.iter().any(|t| match t {
             async_openai::types::AssistantTools::Function(f) =>
                 f.function.name == "open_openai_billing",
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn includes_speedtest_function() {
+        let req = CreateAssistantRequestArgs::default()
+            .instructions("test")
+            .model("gpt-4o")
+            .tools(vec![FunctionObject {
+                name: "speedtest".into(),
+                description: Some(
+                    "Runs an internet speedtest and returns the results.".into(),
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                })),
+                strict: None,
+            }
+            .into()])
+            .build()
+            .unwrap();
+
+        let tools = req.tools.unwrap();
+        assert!(tools.iter().any(|t| match t {
+            async_openai::types::AssistantTools::Function(f) => f.function.name == "speedtest",
             _ => false,
         }));
     }
