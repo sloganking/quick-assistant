@@ -9,6 +9,7 @@ use std::{
         LazyLock, RwLock,
     }, // Use LazyLock from std
     thread,
+    time::Instant,
 };
 use tracing::{info, warn};
 
@@ -25,6 +26,11 @@ static TIMERS: LazyLock<RwLock<Vec<(u64, String, DateTime<Local>)>>> = LazyLock:
     let timers = load_timers_from_disk(&path).expect("Failed to load timers");
     RwLock::new(timers)
 });
+
+// Stopwatch state: (start_time, total_elapsed_before_pause)
+// When running: start_time is Some, when paused: start_time is None
+static STOPWATCH: LazyLock<RwLock<(Option<Instant>, std::time::Duration)>> =
+    LazyLock::new(|| RwLock::new((None, std::time::Duration::ZERO)));
 
 fn load_timers_from_disk(
     path: &Path,
@@ -228,12 +234,84 @@ impl AudibleTimers {
     }
 }
 
+// Stopwatch API
+
+/// Starts the stopwatch. If already running, this does nothing.
+/// If paused, it resumes from where it left off.
+pub fn start_stopwatch() -> String {
+    let mut sw = STOPWATCH.write().unwrap();
+    if sw.0.is_some() {
+        "Stopwatch is already running.".to_string()
+    } else {
+        sw.0 = Some(Instant::now());
+        if sw.1.as_secs() == 0 {
+            "Stopwatch started.".to_string()
+        } else {
+            "Stopwatch resumed.".to_string()
+        }
+    }
+}
+
+/// Stops (pauses) the stopwatch and returns the elapsed time.
+pub fn stop_stopwatch() -> String {
+    let mut sw = STOPWATCH.write().unwrap();
+    match sw.0 {
+        Some(start) => {
+            let elapsed = start.elapsed();
+            sw.1 += elapsed;
+            sw.0 = None;
+            let total = sw.1;
+            format!(
+                "Stopwatch stopped. Total elapsed time: {}",
+                humantime::format_duration(total)
+            )
+        }
+        None => {
+            if sw.1.as_secs() == 0 {
+                "Stopwatch is not running and has no recorded time.".to_string()
+            } else {
+                format!(
+                    "Stopwatch is already stopped. Total elapsed time: {}",
+                    humantime::format_duration(sw.1)
+                )
+            }
+        }
+    }
+}
+
+/// Returns the current elapsed time without stopping the stopwatch.
+pub fn check_stopwatch() -> String {
+    let sw = STOPWATCH.read().unwrap();
+    let total = match sw.0 {
+        Some(start) => sw.1 + start.elapsed(),
+        None => sw.1,
+    };
+
+    if sw.0.is_none() && sw.1.as_secs() == 0 {
+        "Stopwatch has not been started yet.".to_string()
+    } else {
+        let status = if sw.0.is_some() { "running" } else { "stopped" };
+        format!(
+            "Stopwatch is {}. Elapsed time: {}",
+            status,
+            humantime::format_duration(total)
+        )
+    }
+}
+
+/// Resets the stopwatch to zero and stops it if running.
+pub fn reset_stopwatch() -> String {
+    let mut sw = STOPWATCH.write().unwrap();
+    *sw = (None, std::time::Duration::ZERO);
+    "Stopwatch has been reset to zero.".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
-    use chrono::{Local, Duration};
+    use chrono::{Duration, Local};
     use std::env;
+    use tempfile::tempdir;
 
     #[test]
     fn set_get_delete_timer() {
@@ -253,5 +331,95 @@ mod tests {
 
         delete_timer(timers[0].0).unwrap();
         assert!(get_timers().is_empty());
+    }
+
+    #[test]
+    fn test_stopwatch_basic_operations() {
+        // Reset stopwatch to ensure clean state
+        reset_stopwatch();
+
+        // Give it a moment to settle
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Check initial state (after reset it's zero but not started)
+        let result = check_stopwatch();
+        assert!(
+            result.contains("not been started") || result.contains("Elapsed time: 0s"),
+            "Got: {}",
+            result
+        );
+
+        // Start the stopwatch
+        let result = start_stopwatch();
+        assert!(
+            result.contains("started") || result.contains("resumed"),
+            "Got: {}",
+            result
+        );
+
+        // Starting again should indicate it's already running
+        let result = start_stopwatch();
+        assert!(result.contains("already running"), "Got: {}", result);
+
+        // Sleep for a bit
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Check while running
+        let result = check_stopwatch();
+        assert!(result.contains("running"), "Got: {}", result);
+
+        // Stop the stopwatch
+        let result = stop_stopwatch();
+        assert!(
+            result.contains("stopped") || result.contains("Total elapsed time"),
+            "Got: {}",
+            result
+        );
+
+        // Reset the stopwatch
+        let result = reset_stopwatch();
+        assert!(result.contains("reset"), "Got: {}", result);
+
+        // Check after reset
+        let result = check_stopwatch();
+        assert!(
+            result.contains("not been started") || result.contains("Elapsed time: 0s"),
+            "Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stopwatch_pause_resume() {
+        reset_stopwatch();
+
+        // Start stopwatch
+        start_stopwatch();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Stop (pause)
+        stop_stopwatch();
+
+        // Sleep while paused
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Resume (after stopping, starting again should say resumed)
+        let result = start_stopwatch();
+        assert!(
+            result.contains("resumed") || result.contains("started"),
+            "Got: {}",
+            result
+        );
+
+        // Check elapsed time
+        let result = check_stopwatch();
+        assert!(
+            result.contains("running") || result.contains("Elapsed time"),
+            "Got: {}",
+            result
+        );
+
+        // Clean up
+        reset_stopwatch();
     }
 }

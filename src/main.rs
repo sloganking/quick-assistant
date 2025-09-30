@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::{env, fs};
 use tempfile::{tempdir, NamedTempFile};
 use timers::*;
+use timers::{check_stopwatch, reset_stopwatch, start_stopwatch, stop_stopwatch};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::FilterFn;
 use tracing_subscriber::Registry;
@@ -592,12 +593,10 @@ fn call_fn(
             }
         }
 
-        "get_clipboard" => {
-            match get_clipboard_string() {
-                Ok(text) => Some(text),
-                Err(e) => Some(e),
-            }
-        }
+        "get_clipboard" => match get_clipboard_string() {
+            Ok(text) => Some(text),
+            Err(e) => Some(e),
+        },
 
         "qr_to_clipboard" => {
             let args = match serde_json::from_str::<serde_json::Value>(fn_args) {
@@ -701,6 +700,26 @@ fn call_fn(
             } else {
                 Some("Missing 'device_name' argument".to_string())
             }
+        }
+
+        "start_stopwatch" => {
+            info!("Handling start_stopwatch function call.");
+            Some(start_stopwatch())
+        }
+
+        "stop_stopwatch" => {
+            info!("Handling stop_stopwatch function call.");
+            Some(stop_stopwatch())
+        }
+
+        "check_stopwatch" => {
+            info!("Handling check_stopwatch function call.");
+            Some(check_stopwatch())
+        }
+
+        "reset_stopwatch" => {
+            info!("Handling reset_stopwatch function call.");
+            Some(reset_stopwatch())
         }
 
         _ => {
@@ -1008,8 +1027,8 @@ fn qr_to_clipboard(text: &str) -> Result<(), String> {
 }
 
 fn get_clipboard_string() -> Result<String, String> {
-    let mut clipboard: ClipboardContext = ClipboardProvider::new()
-        .map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
+    let mut clipboard: ClipboardContext =
+        ClipboardProvider::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
     clipboard
         .get_contents()
         .map_err(|e| format!("Failed to read clipboard contents: {}", e))
@@ -1729,6 +1748,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": { "device_name": { "type": "string" } },
                                         "required": ["device_name"],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("start_stopwatch")
+                                    .description("Starts the stopwatch. If already running, does nothing. If paused, resumes from where it left off.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("stop_stopwatch")
+                                    .description("Stops (pauses) the stopwatch and returns the total elapsed time. Can be resumed later with start_stopwatch.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("check_stopwatch")
+                                    .description("Returns the current elapsed time on the stopwatch without stopping it. Shows whether it's running or stopped.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("reset_stopwatch")
+                                    .description("Resets the stopwatch to zero and stops it if it's running.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {},
+                                        "required": [],
                                     }))
                                     .build().unwrap(),
                             ])
