@@ -735,7 +735,7 @@ fn call_fn(
             info!("Handling paste_clipboard_in_chunks function call.");
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let chunk_size = args["chunk_size"].as_u64().unwrap_or(1000) as usize;
-            
+
             match paste_clipboard_in_chunks(chunk_size) {
                 Ok(message) => Some(message),
                 Err(e) => Some(format!("Failed to paste clipboard in chunks: {}", e)),
@@ -1061,59 +1061,59 @@ fn paste_clipboard_in_chunks(chunk_size: usize) -> Result<String, String> {
 
     // Get the current clipboard contents
     let clipboard_text = get_clipboard_string()?;
-    
+
     if clipboard_text.is_empty() {
         return Ok("Clipboard is empty, nothing to paste".to_string());
     }
 
     let mut clipboard: ClipboardContext =
         ClipboardProvider::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
-    
+
     let mut enigo = Enigo::new();
-    
+
     // Split the text into chunks
     let chars: Vec<char> = clipboard_text.chars().collect();
     let total_chars = chars.len();
     let mut chunks_pasted = 0;
-    
+
     let mut i = 0;
     while i < total_chars {
         let end = std::cmp::min(i + chunk_size, total_chars);
         let chunk: String = chars[i..end].iter().collect();
-        
+
         // Set the clipboard to this chunk
         clipboard
             .set_contents(chunk.clone())
             .map_err(|e| format!("Failed to set clipboard contents: {}", e))?;
-        
+
         // Wait a moment for the clipboard to be set
         std::thread::sleep(std::time::Duration::from_millis(50));
-        
+
         // Emulate Ctrl+V
         enigo.key_down(enigo::Key::Control);
         enigo.key_click(enigo::Key::Layout('v'));
         enigo.key_up(enigo::Key::Control);
-        
+
         // Wait a moment for the paste to complete
         std::thread::sleep(std::time::Duration::from_millis(50));
-        
+
         // Press Enter to send the message
         enigo.key_click(enigo::Key::Return);
-        
+
         chunks_pasted += 1;
         i = end;
-        
+
         // Wait at least 100ms before next chunk
         if i < total_chars {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
-    
+
     // Restore the original clipboard contents
     clipboard
         .set_contents(clipboard_text)
         .map_err(|e| format!("Failed to restore clipboard contents: {}", e))?;
-    
+
     Ok(format!(
         "Successfully pasted and sent {} characters as {} separate message(s) with chunks of up to {} characters each",
         total_chars, chunks_pasted, chunk_size
