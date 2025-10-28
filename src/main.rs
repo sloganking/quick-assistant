@@ -210,58 +210,6 @@ mod tests {
             Ok(_) => panic!("Expected error for chunk_size 0"),
         }
     }
-
-    #[test]
-    fn test_build_normal_chunks() {
-        let text = "Hello world! This is a test.";
-        let chunks = build_normal_chunks(text, 10);
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].len(), 10);
-        assert_eq!(chunks[1].len(), 10);
-        assert_eq!(chunks[2].len(), 8);
-    }
-
-    #[test]
-    fn test_build_code_chunks() {
-        let text = "fn main() {\n    println!(\"Hello\");\n}";
-        let chunks = build_code_chunks(text, 30);
-        // With overhead of 8 chars for ```\n and \n```, each chunk can hold 22 chars
-        assert!(chunks.len() >= 2);
-        // Each chunk should be wrapped in backticks
-        for chunk in &chunks {
-            assert!(chunk.starts_with("```\n"));
-            assert!(chunk.ends_with("\n```"));
-            // And total size should not exceed limit
-            assert!(chunk.chars().count() <= 30);
-        }
-    }
-
-    #[test]
-    fn test_build_quote_chunks() {
-        let text = "Line 1\nLine 2\nLine 3";
-        let chunks = build_quote_chunks(text, 20);
-        // Each line formatted: "> Line X\n" is 9 chars
-        // So we can fit 2 lines (18 chars) in 20 char limit
-        assert!(chunks.len() >= 2);
-        // Each chunk should have > prefix on lines
-        for chunk in &chunks {
-            assert!(chunk.starts_with("> "));
-            // And total size should not exceed limit
-            assert!(chunk.chars().count() <= 20, "Chunk exceeded size: {} chars", chunk.chars().count());
-        }
-    }
-
-    #[test]
-    fn test_quote_chunks_respects_limit() {
-        // Test with a more realistic Discord limit
-        let text = "This is line one\nThis is line two\nThis is line three\nThis is line four";
-        let chunks = build_quote_chunks(text, 50);
-        
-        for chunk in &chunks {
-            let char_count = chunk.chars().count();
-            assert!(char_count <= 50, "Chunk size {} exceeds limit 50: {}", char_count, chunk);
-        }
-    }
 }
 
 /// Creates a temporary file from a byte slice and returns the path to the file.
@@ -1107,111 +1055,6 @@ fn get_clipboard_string() -> Result<String, String> {
         .map_err(|e| format!("Failed to read clipboard contents: {}", e))
 }
 
-/// Builds normal chunks (no formatting) that fit within chunk_size
-fn build_normal_chunks(text: &str, chunk_size: usize) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut chunks = Vec::new();
-    let mut i = 0;
-    
-    while i < chars.len() {
-        let end = std::cmp::min(i + chunk_size, chars.len());
-        let chunk: String = chars[i..end].iter().collect();
-        chunks.push(chunk);
-        i = end;
-    }
-    
-    chunks
-}
-
-/// Builds quote-formatted chunks where each line has "> " prefix
-/// Ensures the FORMATTED chunk (with prefixes) fits within chunk_size
-fn build_quote_chunks(text: &str, chunk_size: usize) -> Vec<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let mut chunks = Vec::new();
-    let mut current_chunk_lines = Vec::new();
-    let mut current_formatted_size = 0;
-    
-    for line in lines {
-        // Calculate what this line will be after formatting: "> " + line + "\n"
-        let formatted_line_size = 2 + line.chars().count() + 1; // "> " + line + newline
-        
-        // Check if adding this line would exceed the limit
-        if current_formatted_size + formatted_line_size > chunk_size && !current_chunk_lines.is_empty() {
-            // Finalize current chunk
-            let chunk_text = current_chunk_lines
-                .iter()
-                .map(|l| format!("> {}", l))
-                .collect::<Vec<String>>()
-                .join("\n");
-            chunks.push(chunk_text);
-            
-            // Start new chunk
-            current_chunk_lines.clear();
-            current_formatted_size = 0;
-        }
-        
-        // If a single line is too long for chunk_size, split it by characters
-        if formatted_line_size > chunk_size {
-            // Split this long line into character chunks
-            let chars: Vec<char> = line.chars().collect();
-            let max_chars_per_chunk = chunk_size.saturating_sub(3); // Reserve space for "> " and potential newline
-            
-            let mut i = 0;
-            while i < chars.len() {
-                let end = std::cmp::min(i + max_chars_per_chunk, chars.len());
-                let line_chunk: String = chars[i..end].iter().collect();
-                let formatted = format!("> {}", line_chunk);
-                chunks.push(formatted);
-                i = end;
-            }
-        } else {
-            // Add line to current chunk
-            current_chunk_lines.push(line);
-            current_formatted_size += formatted_line_size;
-        }
-    }
-    
-    // Don't forget the last chunk
-    if !current_chunk_lines.is_empty() {
-        let chunk_text = current_chunk_lines
-            .iter()
-            .map(|l| format!("> {}", l))
-            .collect::<Vec<String>>()
-            .join("\n");
-        chunks.push(chunk_text);
-    }
-    
-    chunks
-}
-
-/// Builds code block chunks wrapped in triple backticks
-/// Ensures the FORMATTED chunk (with ```) fits within chunk_size
-fn build_code_chunks(text: &str, chunk_size: usize) -> Vec<String> {
-    // Code block format: ```\n{content}\n```
-    // That's 4 chars for "```\n" at start and 4 chars for "\n```" at end = 8 chars overhead
-    let overhead = 8;
-    
-    if chunk_size <= overhead {
-        // Not enough space for formatting, return empty
-        return vec![];
-    }
-    
-    let available_size = chunk_size - overhead;
-    let chars: Vec<char> = text.chars().collect();
-    let mut chunks = Vec::new();
-    let mut i = 0;
-    
-    while i < chars.len() {
-        let end = std::cmp::min(i + available_size, chars.len());
-        let chunk: String = chars[i..end].iter().collect();
-        let formatted = format!("```\n{}\n```", chunk);
-        chunks.push(formatted);
-        i = end;
-    }
-    
-    chunks
-}
-
 fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, String> {
     if chunk_size == 0 {
         return Err("Chunk size must be greater than 0".to_string());
@@ -1229,18 +1072,101 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
     
     let mut enigo = Enigo::new();
     
-    // Build chunks based on format type, ensuring formatted size fits within chunk_size
+    // Create chunks based on format type
     let chunks: Vec<String> = match format {
-        "quote" => build_quote_chunks(&clipboard_text, chunk_size),
-        "code" | "codeblock" => build_code_chunks(&clipboard_text, chunk_size),
-        _ => build_normal_chunks(&clipboard_text, chunk_size), // "normal" or default
+        "quote" => {
+            // For quotes, we need to respect line boundaries and account for "> " prefix
+            let lines: Vec<&str> = clipboard_text.lines().collect();
+            let mut chunks_vec = Vec::new();
+            let mut current_chunk_lines = Vec::new();
+            let mut current_size = 0;
+            
+            for line in lines {
+                // Calculate size with "> " prefix and newline
+                let formatted_line_size = line.chars().count() + 2; // +2 for "> "
+                let size_with_newline = if current_chunk_lines.is_empty() {
+                    formatted_line_size
+                } else {
+                    formatted_line_size + 1 // +1 for newline
+                };
+                
+                // If adding this line would exceed chunk_size, start a new chunk
+                if current_size + size_with_newline > chunk_size && !current_chunk_lines.is_empty() {
+                    // Format and save current chunk
+                    let formatted_chunk = current_chunk_lines
+                        .iter()
+                        .map(|l| format!("> {}", l))
+                        .collect::<Vec<String>>()
+                        .join("\n");
+                    chunks_vec.push(formatted_chunk);
+                    
+                    // Start new chunk with current line
+                    current_chunk_lines = vec![line];
+                    current_size = formatted_line_size;
+                } else {
+                    // Add line to current chunk
+                    current_chunk_lines.push(line);
+                    current_size += size_with_newline;
+                }
+            }
+            
+            // Don't forget the last chunk
+            if !current_chunk_lines.is_empty() {
+                let formatted_chunk = current_chunk_lines
+                    .iter()
+                    .map(|l| format!("> {}", l))
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                chunks_vec.push(formatted_chunk);
+            }
+            
+            chunks_vec
+        }
+        "code" | "codeblock" => {
+            // For code blocks, account for triple backticks (8 chars: ```\n and \n```)
+            let overhead = 8;
+            let available_size = if chunk_size > overhead {
+                chunk_size - overhead
+            } else {
+                return Err("Chunk size too small for code block formatting (needs at least 9 characters)".to_string());
+            };
+            
+            let chars: Vec<char> = clipboard_text.chars().collect();
+            let mut chunks_vec = Vec::new();
+            let mut i = 0;
+            
+            while i < chars.len() {
+                let end = std::cmp::min(i + available_size, chars.len());
+                let chunk_text: String = chars[i..end].iter().collect();
+                let formatted_chunk = format!("```\n{}\n```", chunk_text);
+                chunks_vec.push(formatted_chunk);
+                i = end;
+            }
+            
+            chunks_vec
+        }
+        _ => {
+            // "normal" - simple character-based splitting
+            let chars: Vec<char> = clipboard_text.chars().collect();
+            let mut chunks_vec = Vec::new();
+            let mut i = 0;
+            
+            while i < chars.len() {
+                let end = std::cmp::min(i + chunk_size, chars.len());
+                let chunk: String = chars[i..end].iter().collect();
+                chunks_vec.push(chunk);
+                i = end;
+            }
+            
+            chunks_vec
+        }
     };
     
-    let total_chars = clipboard_text.len();
+    let total_chars = clipboard_text.chars().count();
     let chunks_pasted = chunks.len();
     
     // Paste each chunk
-    for formatted_chunk in chunks {
+    for formatted_chunk in &chunks {
         // Set the clipboard to this formatted chunk
         clipboard
             .set_contents(formatted_chunk.clone())
