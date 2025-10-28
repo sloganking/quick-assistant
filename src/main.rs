@@ -201,6 +201,15 @@ mod tests {
             Err(_) => {}
         }
     }
+
+    #[test]
+    fn paste_clipboard_in_chunks_validation() {
+        // Test that chunk_size must be greater than 0
+        match paste_clipboard_in_chunks(0) {
+            Err(msg) => assert!(msg.contains("greater than 0")),
+            Ok(_) => panic!("Expected error for chunk_size 0"),
+        }
+    }
 }
 
 /// Creates a temporary file from a byte slice and returns the path to the file.
@@ -722,6 +731,17 @@ fn call_fn(
             Some(reset_stopwatch())
         }
 
+        "paste_clipboard_in_chunks" => {
+            info!("Handling paste_clipboard_in_chunks function call.");
+            let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
+            let chunk_size = args["chunk_size"].as_u64().unwrap_or(1000) as usize;
+            
+            match paste_clipboard_in_chunks(chunk_size) {
+                Ok(message) => Some(message),
+                Err(e) => Some(format!("Failed to paste clipboard in chunks: {}", e)),
+            }
+        }
+
         _ => {
             println!("Unknown function: {}", fn_name);
             warn!("AI called unknown function: {}", fn_name);
@@ -1032,6 +1052,66 @@ fn get_clipboard_string() -> Result<String, String> {
     clipboard
         .get_contents()
         .map_err(|e| format!("Failed to read clipboard contents: {}", e))
+}
+
+fn paste_clipboard_in_chunks(chunk_size: usize) -> Result<String, String> {
+    if chunk_size == 0 {
+        return Err("Chunk size must be greater than 0".to_string());
+    }
+
+    // Get the current clipboard contents
+    let clipboard_text = get_clipboard_string()?;
+    
+    if clipboard_text.is_empty() {
+        return Ok("Clipboard is empty, nothing to paste".to_string());
+    }
+
+    let mut clipboard: ClipboardContext =
+        ClipboardProvider::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
+    
+    let mut enigo = Enigo::new();
+    
+    // Split the text into chunks
+    let chars: Vec<char> = clipboard_text.chars().collect();
+    let total_chars = chars.len();
+    let mut chunks_pasted = 0;
+    
+    let mut i = 0;
+    while i < total_chars {
+        let end = std::cmp::min(i + chunk_size, total_chars);
+        let chunk: String = chars[i..end].iter().collect();
+        
+        // Set the clipboard to this chunk
+        clipboard
+            .set_contents(chunk.clone())
+            .map_err(|e| format!("Failed to set clipboard contents: {}", e))?;
+        
+        // Wait a moment for the clipboard to be set
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        
+        // Emulate Ctrl+V
+        enigo.key_down(enigo::Key::Control);
+        enigo.key_click(enigo::Key::Layout('v'));
+        enigo.key_up(enigo::Key::Control);
+        
+        chunks_pasted += 1;
+        i = end;
+        
+        // Wait at least 100ms before next chunk
+        if i < total_chars {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    
+    // Restore the original clipboard contents
+    clipboard
+        .set_contents(clipboard_text)
+        .map_err(|e| format!("Failed to restore clipboard contents: {}", e))?;
+    
+    Ok(format!(
+        "Successfully pasted {} characters in {} chunk(s) of up to {} characters each",
+        total_chars, chunks_pasted, chunk_size
+    ))
 }
 
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
@@ -1788,6 +1868,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         "type": "object",
                                         "properties": {},
                                         "required": [],
+                                    }))
+                                    .build().unwrap(),
+
+                                ChatCompletionFunctionsArgs::default()
+                                    .name("paste_clipboard_in_chunks")
+                                    .description("Takes the current clipboard contents, splits it into chunks of a specified character size, and pastes each chunk by emulating Ctrl+V with a 100ms delay between chunks. Useful for pasting large amounts of text into applications that have character limits or input rate limits.")
+                                    .parameters(json!({
+                                        "type": "object",
+                                        "properties": {
+                                            "chunk_size": {
+                                                "type": "integer",
+                                                "description": "The maximum number of characters per chunk. Must be greater than 0.",
+                                            },
+                                        },
+                                        "required": ["chunk_size"],
                                     }))
                                     .build().unwrap(),
                             ])
