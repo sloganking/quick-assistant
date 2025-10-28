@@ -1094,6 +1094,12 @@ fn paste_clipboard_in_chunks(chunk_size: usize) -> Result<String, String> {
         enigo.key_click(enigo::Key::Layout('v'));
         enigo.key_up(enigo::Key::Control);
         
+        // Wait a moment for the paste to complete
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        
+        // Press Enter to send the message
+        enigo.key_click(enigo::Key::Return);
+        
         chunks_pasted += 1;
         i = end;
         
@@ -1109,7 +1115,7 @@ fn paste_clipboard_in_chunks(chunk_size: usize) -> Result<String, String> {
         .map_err(|e| format!("Failed to restore clipboard contents: {}", e))?;
     
     Ok(format!(
-        "Successfully pasted {} characters in {} chunk(s) of up to {} characters each",
+        "Successfully pasted and sent {} characters as {} separate message(s) with chunks of up to {} characters each",
         total_chars, chunks_pasted, chunk_size
     ))
 }
@@ -1873,7 +1879,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("paste_clipboard_in_chunks")
-                                    .description("Takes the current clipboard contents, splits it into chunks of a specified character size, and pastes each chunk by emulating Ctrl+V with a 100ms delay between chunks. Useful for pasting large amounts of text into applications that have character limits or input rate limits.")
+                                    .description("Takes the current clipboard contents, splits it into chunks of a specified character size, and pastes each chunk by emulating Ctrl+V followed by Enter. This sends each chunk as a separate message. Useful for pasting large amounts of text into chat applications or other applications that have character limits per message.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {
