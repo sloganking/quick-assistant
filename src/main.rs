@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn paste_clipboard_in_chunks_validation() {
         // Test that chunk_size must be greater than 0
-        match paste_clipboard_in_chunks(0) {
+        match paste_clipboard_in_chunks(0, "normal") {
             Err(msg) => assert!(msg.contains("greater than 0")),
             Ok(_) => panic!("Expected error for chunk_size 0"),
         }
@@ -735,8 +735,9 @@ fn call_fn(
             info!("Handling paste_clipboard_in_chunks function call.");
             let args: serde_json::Value = serde_json::from_str(fn_args).unwrap();
             let chunk_size = args["chunk_size"].as_u64().unwrap_or(1000) as usize;
-
-            match paste_clipboard_in_chunks(chunk_size) {
+            let format = args["format"].as_str().unwrap_or("normal");
+            
+            match paste_clipboard_in_chunks(chunk_size, format) {
                 Ok(message) => Some(message),
                 Err(e) => Some(format!("Failed to paste clipboard in chunks: {}", e)),
             }
@@ -1054,36 +1055,53 @@ fn get_clipboard_string() -> Result<String, String> {
         .map_err(|e| format!("Failed to read clipboard contents: {}", e))
 }
 
-fn paste_clipboard_in_chunks(chunk_size: usize) -> Result<String, String> {
+fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, String> {
     if chunk_size == 0 {
         return Err("Chunk size must be greater than 0".to_string());
     }
 
     // Get the current clipboard contents
     let clipboard_text = get_clipboard_string()?;
-
+    
     if clipboard_text.is_empty() {
         return Ok("Clipboard is empty, nothing to paste".to_string());
     }
 
     let mut clipboard: ClipboardContext =
         ClipboardProvider::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
-
+    
     let mut enigo = Enigo::new();
-
+    
     // Split the text into chunks
     let chars: Vec<char> = clipboard_text.chars().collect();
     let total_chars = chars.len();
     let mut chunks_pasted = 0;
-
+    
     let mut i = 0;
     while i < total_chars {
         let end = std::cmp::min(i + chunk_size, total_chars);
         let chunk: String = chars[i..end].iter().collect();
-
-        // Set the clipboard to this chunk
+        
+        // Apply formatting based on the format parameter
+        let formatted_chunk = match format {
+            "quote" => {
+                // Add "> " to the beginning of each line
+                chunk
+                    .lines()
+                    .map(|line| format!("> {}", line))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            }
+            "code" | "codeblock" => {
+                // Wrap in triple backticks
+                format!("```\n{}\n```", chunk)
+            }
+            _ => chunk, // "normal" or any other value: no formatting
+        };
+        
+        // Set the clipboard to this formatted chunk
         clipboard
-            .set_contents(chunk.clone())
+            .set_contents(formatted_chunk.clone())
             .map_err(|e| format!("Failed to set clipboard contents: {}", e))?;
 
         // Wait a moment for the clipboard to be set
@@ -1114,9 +1132,15 @@ fn paste_clipboard_in_chunks(chunk_size: usize) -> Result<String, String> {
         .set_contents(clipboard_text)
         .map_err(|e| format!("Failed to restore clipboard contents: {}", e))?;
 
+    let format_desc = match format {
+        "quote" => " with Discord quote formatting (> prefix)",
+        "code" | "codeblock" => " with Discord code block formatting (```)",
+        _ => "",
+    };
+    
     Ok(format!(
-        "Successfully pasted and sent {} characters as {} separate message(s) with chunks of up to {} characters each",
-        total_chars, chunks_pasted, chunk_size
+        "Successfully pasted and sent {} characters as {} separate message(s) with chunks of up to {} characters each{}",
+        total_chars, chunks_pasted, chunk_size, format_desc
     ))
 }
 
@@ -1879,13 +1903,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 ChatCompletionFunctionsArgs::default()
                                     .name("paste_clipboard_in_chunks")
-                                    .description("Takes the current clipboard contents, splits it into chunks of a specified character size, and pastes each chunk by emulating Ctrl+V followed by Enter. This sends each chunk as a separate message. Useful for pasting large amounts of text into chat applications or other applications that have character limits per message.")
+                                    .description("Takes the current clipboard contents, splits it into chunks of a specified character size, and pastes each chunk by emulating Ctrl+V followed by Enter. This sends each chunk as a separate message. Supports optional Discord markdown formatting: 'quote' adds '> ' prefix to each line, 'code' or 'codeblock' wraps in triple backticks (```). Use 'normal' or omit for no formatting.")
                                     .parameters(json!({
                                         "type": "object",
                                         "properties": {
                                             "chunk_size": {
                                                 "type": "integer",
                                                 "description": "The maximum number of characters per chunk. Must be greater than 0.",
+                                            },
+                                            "format": {
+                                                "type": "string",
+                                                "enum": ["normal", "quote", "code", "codeblock"],
+                                                "description": "Optional formatting style. 'quote' adds '> ' to each line for Discord quotes. 'code' or 'codeblock' wraps text in triple backticks for code blocks. 'normal' (default) pastes without formatting.",
                                             },
                                         },
                                         "required": ["chunk_size"],
