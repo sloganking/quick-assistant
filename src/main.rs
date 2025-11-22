@@ -964,7 +964,8 @@ async fn get_location() -> Result<String, String> {
     #[derive(serde::Deserialize)]
     struct ApiResponse {
         city: Option<String>,
-        regionName: Option<String>,
+        #[serde(rename = "regionName")]
+        region_name: Option<String>,
         country: Option<String>,
         lat: Option<f64>,
         lon: Option<f64>,
@@ -979,7 +980,7 @@ async fn get_location() -> Result<String, String> {
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     let city = data.city.unwrap_or_default();
-    let region = data.regionName.unwrap_or_default();
+    let region = data.region_name.unwrap_or_default();
     let country = data.country.unwrap_or_default();
     let lat = data.lat.unwrap_or_default();
     let lon = data.lon.unwrap_or_default();
@@ -1062,16 +1063,16 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
 
     // Get the current clipboard contents
     let clipboard_text = get_clipboard_string()?;
-    
+
     if clipboard_text.is_empty() {
         return Ok("Clipboard is empty, nothing to paste".to_string());
     }
 
     let mut clipboard: ClipboardContext =
         ClipboardProvider::new().map_err(|e| format!("Failed to initialize clipboard: {}", e))?;
-    
+
     let mut enigo = Enigo::new();
-    
+
     // Create chunks based on format type
     let chunks: Vec<String> = match format {
         "quote" => {
@@ -1080,7 +1081,7 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
             let mut chunks_vec = Vec::new();
             let mut current_chunk_lines = Vec::new();
             let mut current_size = 0;
-            
+
             for line in lines {
                 // Calculate size with "> " prefix and newline
                 let formatted_line_size = line.chars().count() + 2; // +2 for "> "
@@ -1089,9 +1090,10 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
                 } else {
                     formatted_line_size + 1 // +1 for newline
                 };
-                
+
                 // If adding this line would exceed chunk_size, start a new chunk
-                if current_size + size_with_newline > chunk_size && !current_chunk_lines.is_empty() {
+                if current_size + size_with_newline > chunk_size && !current_chunk_lines.is_empty()
+                {
                     // Format and save current chunk
                     let formatted_chunk = current_chunk_lines
                         .iter()
@@ -1099,7 +1101,7 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
                         .collect::<Vec<String>>()
                         .join("\n");
                     chunks_vec.push(formatted_chunk);
-                    
+
                     // Start new chunk with current line
                     current_chunk_lines = vec![line];
                     current_size = formatted_line_size;
@@ -1109,7 +1111,7 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
                     current_size += size_with_newline;
                 }
             }
-            
+
             // Don't forget the last chunk
             if !current_chunk_lines.is_empty() {
                 let formatted_chunk = current_chunk_lines
@@ -1119,7 +1121,7 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
                     .join("\n");
                 chunks_vec.push(formatted_chunk);
             }
-            
+
             chunks_vec
         }
         "code" | "codeblock" => {
@@ -1128,13 +1130,16 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
             let available_size = if chunk_size > overhead {
                 chunk_size - overhead
             } else {
-                return Err("Chunk size too small for code block formatting (needs at least 9 characters)".to_string());
+                return Err(
+                    "Chunk size too small for code block formatting (needs at least 9 characters)"
+                        .to_string(),
+                );
             };
-            
+
             let chars: Vec<char> = clipboard_text.chars().collect();
             let mut chunks_vec = Vec::new();
             let mut i = 0;
-            
+
             while i < chars.len() {
                 let end = std::cmp::min(i + available_size, chars.len());
                 let chunk_text: String = chars[i..end].iter().collect();
@@ -1142,7 +1147,7 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
                 chunks_vec.push(formatted_chunk);
                 i = end;
             }
-            
+
             chunks_vec
         }
         _ => {
@@ -1150,21 +1155,21 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
             let chars: Vec<char> = clipboard_text.chars().collect();
             let mut chunks_vec = Vec::new();
             let mut i = 0;
-            
+
             while i < chars.len() {
                 let end = std::cmp::min(i + chunk_size, chars.len());
                 let chunk: String = chars[i..end].iter().collect();
                 chunks_vec.push(chunk);
                 i = end;
             }
-            
+
             chunks_vec
         }
     };
-    
+
     let total_chars = clipboard_text.chars().count();
     let chunks_pasted = chunks.len();
-    
+
     // Paste each chunk
     for formatted_chunk in &chunks {
         // Set the clipboard to this formatted chunk
@@ -1174,18 +1179,18 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
 
         // Wait a moment for the clipboard to be set
         std::thread::sleep(std::time::Duration::from_millis(50));
-        
+
         // Emulate Ctrl+V
         enigo.key_down(enigo::Key::Control);
         enigo.key_click(enigo::Key::Layout('v'));
         enigo.key_up(enigo::Key::Control);
-        
+
         // Wait a moment for the paste to complete
         std::thread::sleep(std::time::Duration::from_millis(50));
-        
+
         // Press Enter to send the message
         enigo.key_click(enigo::Key::Return);
-        
+
         // Wait at least 100ms before next chunk
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -1426,7 +1431,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
 
                                 if duck_ptt {
-                                    let mut thread_speak_stream =
+                                    let thread_speak_stream =
                                         thread_speak_stream_mutex.lock().unwrap();
                                     thread_speak_stream.stop_audio_ducking();
                                     drop(thread_speak_stream);
