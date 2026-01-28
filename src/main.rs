@@ -10,10 +10,10 @@ use qrcode_generator::{to_image_from_str, QrCodeEcc};
 use serde_json::json;
 use std::borrow::Cow;
 use std::fs::File;
-use std::io::{stdout, BufReader, Write};
+use std::io::{stdout, BufReader, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::{env, fs};
 use tempfile::{tempdir, NamedTempFile};
 use timers::*;
@@ -46,6 +46,7 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 use cpal::traits::{DeviceTrait, HostTrait};
 use enigo::{Enigo, KeyboardControllable};
+use rodio::{source::SineWave, Decoder, Source};
 use rdev::{listen, Event};
 use record::rec;
 use speakstream::ss;
@@ -1214,6 +1215,99 @@ fn paste_clipboard_in_chunks(chunk_size: usize, format: &str) -> Result<String, 
 
 static FAILED_TEMP_FILE: LazyLock<NamedTempFile> =
     LazyLock::new(|| temp_asset!("../assets/failed.mp3"));
+static TICK_BYTES: &[u8] = include_bytes!("../assets/tick.mp3");
+static BEEP_LOW_BYTES: &[u8] = include_bytes!("../assets/beep_low.mp3");
+static BEEP_HIGH_BYTES: &[u8] = include_bytes!("../assets/beep.mp3");
+
+fn tick_loop(stop_rx: mpsc::Receiver<()>) {
+    let tick_sink = DefaultDeviceSink::new();
+    loop {
+        if stop_rx.try_recv().is_ok() {
+            tick_sink.stop();
+            break;
+        }
+        if tick_sink.empty() {
+            let cursor = Cursor::new(TICK_BYTES);
+            if let Ok(decoder) = Decoder::new(BufReader::new(cursor)) {
+                tick_sink.stop();
+                tick_sink.append(decoder);
+            } else {
+                tick_sink.stop();
+                tick_sink.append(
+                    SineWave::new(880.0)
+                        .take_duration(Duration::from_millis(50))
+                        .amplify(0.20),
+                );
+            }
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+struct TickGuard {
+    stop_tx: Option<mpsc::Sender<()>>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl TickGuard {
+    fn start() -> Self {
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let handle = thread::spawn(move || tick_loop(stop_rx));
+        Self {
+            stop_tx: Some(stop_tx),
+            handle: Some(handle),
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for TickGuard {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+fn play_ptt_press_sound() {
+    thread::spawn(|| {
+        let sink = DefaultDeviceSink::new();
+        if let Ok(decoder) = Decoder::new(BufReader::new(Cursor::new(BEEP_LOW_BYTES))) {
+            sink.append(decoder);
+            sink.sleep_until_end();
+        } else {
+            sink.append(
+                SineWave::new(440.0)
+                    .take_duration(Duration::from_millis(120))
+                    .amplify(0.20),
+            );
+            sink.sleep_until_end();
+        }
+    });
+}
+
+fn play_ptt_release_sound() {
+    thread::spawn(|| {
+        let sink = DefaultDeviceSink::new();
+        if let Ok(decoder) = Decoder::new(BufReader::new(Cursor::new(BEEP_HIGH_BYTES))) {
+            sink.append(decoder);
+            sink.sleep_until_end();
+        } else {
+            sink.append(
+                SineWave::new(880.0)
+                    .take_duration(Duration::from_millis(120))
+                    .amplify(0.20),
+            );
+            sink.sleep_until_end();
+        }
+    });
+}
 
 /// A global, lazily-initialized closure for sending paths into a channel.
 static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(|| {
@@ -1230,7 +1324,7 @@ static PLAY_AUDIO: LazyLock<Box<dyn Fn(&Path) + Send + Sync>> = LazyLock::new(||
         for audio_path in audio_playing_rx.iter() {
             let file = std::fs::File::open(audio_path).unwrap();
             sink.stop();
-            sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+            sink.append(Decoder::new(BufReader::new(file)).unwrap());
             // sink.play();
         }
     });
@@ -1366,6 +1460,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 // handle key press
 
                                 audible_timers.stop_alarm();
+                                play_ptt_press_sound();
 
                                 // stop the AI voice from speaking
                                 {
@@ -1405,6 +1500,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                                 // stop any alarms
                                 audible_timers.stop_alarm();
+                                play_ptt_release_sound();
 
                                 // get elapsed time since recording started
                                 let elapsed_option = match recording_start.elapsed() {
@@ -1503,10 +1599,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     drop(thread_speak_stream);
 
                     info!("Transcribing user audio");
-                    let transcription_result = match runtime.block_on(future::timeout(
+                    let mut tick_guard = TickGuard::start();
+                    let transcription_result = runtime.block_on(future::timeout(
                         Duration::from_secs(10),
                         transcribe::transcribe(&client, &audio_path),
-                    )) {
+                    ));
+                    tick_guard.stop();
+
+                    let transcription_result = match transcription_result {
                         Ok(transcription_result) => transcription_result,
                         Err(err) => {
                             println_error(&format!(
@@ -1992,6 +2092,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             .build()
                             .unwrap();
 
+                        let _tick_guard = TickGuard::start();
                         let mut stream = match runtime.block_on(future::timeout(
                             Duration::from_secs(15),
                             client.chat().create_stream(request),
