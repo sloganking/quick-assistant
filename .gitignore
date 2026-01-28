@@ -15,6 +15,6 @@ target/
 /target
 
 .env
-*.mp3
+
 
 logs/
