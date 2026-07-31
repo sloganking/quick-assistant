@@ -1348,7 +1348,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(voice) => voice.into(),
         None => Voice::Echo,
     };
-    let mut speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick, opt.duck);
+    // `--duck` is a flag; other apps play at half volume while the assistant speaks.
+    let duck_level = if opt.duck { Some(0.5) } else { None };
+    let mut speak_stream = ss::SpeakStream::new(ai_voice, opt.speech_speed, opt.tick, duck_level);
     if opt.mute {
         speak_stream.mute();
     }
